@@ -128,10 +128,10 @@ func (s *Storage) AllMarkdownFiles() ([]string, error) {
 
 // BuildInitialContent 生成新日记的初始内容。
 // 格式:
-//   # YYYY-MM-DD 周X
 //
-//   ## HH:MM
+//	# YYYY-MM-DD 周X
 //
+//	## HH:MM
 func BuildInitialContent(t time.Time) string {
 	weekdayCN := []string{"日", "一", "二", "三", "四", "五", "六"}
 	return fmt.Sprintf("# %s 周%s\n\n## %s\n\n",
