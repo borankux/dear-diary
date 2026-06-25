@@ -1,0 +1,23 @@
+# Build artifacts
+/bin/
+/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test / coverage
+*.test
+*.out
+coverage.txt
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local diary data is intentionally NOT ignored — that lives in
+# ~/Documents/dear-diary/ which is outside this repo.
