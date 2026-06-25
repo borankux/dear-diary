@@ -1,0 +1,40 @@
+# dear-diary
+
+> Vim-first terminal diary app for macOS. Opens daily Markdown journal entries in Vim, provides a Bubble Tea TUI calendar browser, and searches local journal history from the command line.
+
+## Canonical repository
+
+https://github.com/borankux/dear-diary
+
+## Summary
+
+dear-diary is a local-first command-line journaling tool written in Go. The default command, `diary`, opens today's Markdown journal file under `~/Documents/dear-diary/YYYY-MM/YYYY-MM-DD.md`. Reopening today's entry appends a new timestamp section instead of overwriting previous writing. `diary browse` opens a terminal calendar view, and `diary search <keyword>` searches all journal entries.
+
+## Primary audience
+
+- Developers who journal from the terminal
+- Vim or Neovim users
+- People who prefer local Markdown files over hosted journal services
+- Users building a long-term personal archive that can be backed up with normal file tools
+
+## Key commands
+
+- `diary`: open today's journal entry
+- `diary browse`: browse entries in a TUI calendar
+- `diary today`: open today explicitly
+- `diary yesterday` or `diary y`: open yesterday
+- `diary <date>`: open a specific date
+- `diary search <keyword>`: search local journal entries
+
+## Important files
+
+- `README.md`: user-facing overview, installation, usage, and FAQ
+- `docs/spec.md`: product and implementation spec
+- `cmd/diary/main.go`: CLI command dispatch
+- `internal/storage/storage.go`: Markdown storage model
+- `internal/search/search.go`: search implementation
+- `internal/tui/`: Bubble Tea calendar and search result UI
+
+## Positioning
+
+dear-diary is not a hosted journaling platform, database-backed note app, or rich-text editor. It is a small local-first tool that routes dates, opens Vim, keeps Markdown files organized, and adds terminal browsing and search.

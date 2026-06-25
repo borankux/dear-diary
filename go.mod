@@ -1,4 +1,4 @@
-module dear-diary
+module github.com/borankux/dear-diary
 
 go 1.26.3
 

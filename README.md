@@ -1,44 +1,66 @@
 # 亲爱的日记 (dear-diary)
 
-一个 macOS 终端的 TUI 日记应用，用 Vim 写日记，用月历浏览。
+[![CI](https://github.com/borankux/dear-diary/actions/workflows/ci.yml/badge.svg)](https://github.com/borankux/dear-diary/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/borankux/dear-diary.svg)](https://pkg.go.dev/github.com/borankux/dear-diary)
 
-## 为什么
+亲爱的日记是一个 Vim-first 的 macOS 终端日记工具：输入 `diary` 直接用 Vim 写今天，输入 `diary browse` 用 TUI 月历回看，输入 `diary search <keyword>` 全文搜索 Markdown 日记。
 
-- **Vim 原生写作**：100% 复用你的 `~/.vimrc`、插件、键位
-- **TUI 月历导航**：一眼看到哪天写了 / 哪天没写
-- **同一天多次打开 = 同一篇日记**：自动追加时间戳段落，连续记录不会覆盖
-- **纯 Markdown 文件**：可读、可备份、可被 Obsidian 等工具读取
-- **零运行时依赖**：单二进制，启动几乎零延迟
+Dear Diary is a Vim-first terminal journal app for macOS. It stores plain Markdown files, opens entries in your editor, provides a Bubble Tea calendar browser, and searches journal history from the command line.
 
-## 安装
+## Why dear-diary
+
+- **Vim-native writing**: reuse your `~/.vimrc`, plugins, muscle memory, and terminal workflow.
+- **TUI calendar browsing**: see written days and jump through months without leaving the terminal.
+- **Safe same-day append**: reopening today adds a new timestamp section instead of overwriting earlier notes.
+- **Plain Markdown storage**: readable, portable, git-friendly, and compatible with Obsidian or any text editor.
+- **Fast single binary**: Go CLI with no runtime service, database, account, or cloud dependency.
+- **Private by default**: journal data lives locally under `~/Documents/dear-diary/`.
+
+## Use cases
+
+- Daily journaling from the terminal
+- Work log and engineering diary
+- Vim-based personal notes
+- Local-first Markdown journal archive
+- Lightweight command-line diary search
+
+## Install
 
 ```bash
-git clone <this repo> dear-diary
+git clone https://github.com/borankux/dear-diary.git
 cd dear-diary
-make install        # 会问 sudo，装到 /usr/local/bin/diary
+make install
 ```
 
-确认装好：
+Or build locally:
+
 ```bash
-diary --version
+make build
+./bin/diary --version
 ```
 
-## 使用
+Once the module is indexed by Go tooling, you can also install with:
 
-| 命令 | 行为 |
-|------|------|
-| `diary` | 打开今天，直接进 Vim |
-| `diary browse` | 进入 TUI 月历浏览 |
-| `diary today` | 同 `diary` |
-| `diary yesterday` | 打开昨天（别名 `diary y`） |
-| `diary 2026-06-24` | 打开指定日期 |
-| `diary 6/24` | 月/日（默认今年） |
-| `diary search 关键词` | 全文搜索所有日记 |
-| `diary -h` | 帮助 |
+```bash
+go install github.com/borankux/dear-diary/cmd/diary@latest
+```
 
-### 同一天多次写
+## Usage
 
-第一次：创建文件 + 写入标题 + 第一个时间段 → 进入 Vim
+| Command | Behavior |
+|---|---|
+| `diary` | Open today's journal in Vim |
+| `diary browse` | Open the TUI calendar browser |
+| `diary today` | Open today explicitly |
+| `diary yesterday` or `diary y` | Open yesterday |
+| `diary 2026-06-24` | Open a specific date |
+| `diary 6/24` | Open month/day in the current year |
+| `diary search keyword` | Search all journal entries |
+| `diary -h` | Show help |
+
+## Daily writing model
+
+The first `diary` call creates today's file:
 
 ```markdown
 # 2026-06-25 周四
@@ -48,58 +70,55 @@ diary --version
 今天开始做 TUI 日记应用。
 ```
 
-几小时后再次 `diary`：自动在末尾追加新时间段
+Opening `diary` again later appends a fresh section:
 
 ```markdown
-# 2026-06-25 周四
-
-## 09:00
-
-今天开始做 TUI 日记应用。
-
 ## 22:30
 
 下班前把 search 功能也加上了。
 ```
 
-5 分钟内重复打开不会重复追加（避免误触产生空段落）。
+If you reopen within five minutes, dear-diary avoids creating duplicate empty timestamp sections.
 
-### TUI 月历键位
+## TUI calendar
 
+```text
+hjkl / arrow keys    Move cursor
+H / L or < / >       Previous / next month
+t                    Jump to today
+g / G                Jump to month start / month end
+Enter                Open selected day
+/                    Show search hint
+?                    Toggle help
+q / Esc              Quit
 ```
-hjkl / 方向键    移动光标
-H / L 或 < / >   切换上一月 / 下一月
-t                跳到今天
-g / G            跳到月初 / 月末
-Enter            打开当天 Vim
-/                提示用 search 子命令
-?                显示键位帮助
-q / Esc          退出
-```
 
-视觉标记：
-- `◆` 今天
-- `●` 已写日记的天（绿色）
-- 光标位置反色高亮
+Visual markers:
 
-## 编辑器选择
+- `◆` today
+- `●` day with a journal entry
+- highlighted cell: current cursor
 
-优先级：
-1. `$DIARY_EDITOR`（本项目专用）
-2. `$EDITOR`（通用）
-3. `vim`（默认）
+## Editor selection
 
-设成其他编辑器：
+Priority:
+
+1. `$DIARY_EDITOR`
+2. `$EDITOR`
+3. `vim`
+
+Examples:
+
 ```bash
-export DIARY_EDITOR=nvim        # Neovim
-export DIARY_EDITOR="code -w"   # VS Code (等待关闭)
+export DIARY_EDITOR=nvim
+export DIARY_EDITOR="code -w"
 ```
 
-> 提示：非 vim 系列编辑器不会自动追加时间戳光标定位（仍能正常打开文件）。
+Vim-compatible editors get cursor positioning at the append point. Other editors still open the Markdown file normally.
 
-## 文件存储
+## Storage
 
-```
+```text
 ~/Documents/dear-diary/
   2026-06/
     2026-06-23.md
@@ -109,39 +128,75 @@ export DIARY_EDITOR="code -w"   # VS Code (等待关闭)
     2026-07-01.md
 ```
 
-- 路径：`~/Documents/dear-diary/YYYY-MM/YYYY-MM-DD.md`
-- iCloud Drive 开启时自动跨设备同步
-- 可设 `$DIARY_DIR` 覆盖根目录（测试用）
+- Default path: `~/Documents/dear-diary/YYYY-MM/YYYY-MM-DD.md`
+- Override root path with `$DIARY_DIR`
+- Works well with iCloud Drive, Dropbox, Time Machine, git, or any file backup flow
 
-## 搜索
+## Search
 
-优先用 `rg`（ripgrep），没装则自动回退到纯 Go 实现：
-
-```bash
-diary search Bubbletea
-```
-
-结果列表 TUI，`Enter` 打开、`j/k` 滚动、`q` 退出。
-
-## 开发
+Search uses `rg` when ripgrep is installed and falls back to pure Go scanning when it is not.
 
 ```bash
-make test         # 跑所有测试
-make build        # 编译到 ./bin/diary
-make fmt vet      # 格式化 + 静态检查
+diary search bubbletea
 ```
 
-技术栈：Go 1.26+ · [Bubble Tea](https://github.com/charmbracelet/bubbletea) · [Lipgloss](https://github.com/charmbracelet/lipgloss)
+Results are shown in a TUI list. Press `Enter` to open a matching entry, `j/k` to move, and `q` to quit.
 
-## 不做的（YAGNI）
+## Development
 
-- 多用户、云同步（iCloud / Dropbox 已经够）
-- 富文本 / 所见即所得（Markdown 就够）
-- 加密（macOS FileVault + iCloud ADP 已经够，需要时单独加）
-- 内嵌编辑器（Vim 才是想要的）
-- 心情 / 天气 metadata（MVP 不做，未来扩展）
-- 自动备份（让 iCloud / git 来）
+```bash
+make test
+make build
+make fmt vet
+```
+
+Tech stack:
+
+- Go 1.26+
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea)
+- [Lipgloss](https://github.com/charmbracelet/lipgloss)
+
+Project layout:
+
+```text
+cmd/diary/          CLI entrypoint
+internal/storage/   Markdown file paths, creation, append, and scanning
+internal/editor/    Editor integration
+internal/search/    ripgrep and pure Go search
+internal/tui/       Bubble Tea calendar and search views
+docs/spec.md        Product and implementation spec
+```
+
+## Roadmap
+
+- `diary stats`: word count, streaks, and writing cadence
+- `diary export`: HTML or PDF export
+- Tag extraction from Markdown content
+- Optional encrypted archive support
+- Homebrew formula or release binaries
+
+## FAQ
+
+### Is dear-diary a cloud journal app?
+
+No. It is a local-first terminal journal. Sync and backup are intentionally delegated to file-system tools such as iCloud Drive, Dropbox, Time Machine, or git.
+
+### Does it replace Vim?
+
+No. It launches your editor and keeps the app focused on date routing, calendar browsing, and search.
+
+### Can I use it outside macOS?
+
+The code is Go and should be portable, but the current product target is macOS terminal usage with Vim-style workflows.
+
+### Where are my private diary entries stored?
+
+Journal entries are not stored in this repository. They are written to `~/Documents/dear-diary/` by default.
+
+## Keywords
+
+terminal diary, command-line journal, CLI journal, Markdown journal, Vim journal, TUI diary, Bubble Tea app, Go CLI, local-first notes, developer journal, personal knowledge management, macOS journal app.
 
 ## License
 
-Personal use.
+Personal use. No open-source license has been selected yet.

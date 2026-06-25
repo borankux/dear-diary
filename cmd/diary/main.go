@@ -10,10 +10,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"dear-diary/internal/editor"
-	"dear-diary/internal/search"
-	"dear-diary/internal/storage"
-	"dear-diary/internal/tui"
+	"github.com/borankux/dear-diary/internal/editor"
+	"github.com/borankux/dear-diary/internal/search"
+	"github.com/borankux/dear-diary/internal/storage"
+	"github.com/borankux/dear-diary/internal/tui"
 )
 
 const version = "0.1.0"
@@ -109,7 +109,8 @@ func runSearch(keyword string) error {
 
 // mustOpen 打开指定日期的 Vim。
 // honorAppendMode: false 表示"今天用默认行为 (智能追加)"
-//                  true 表示"明确非今天 (历史回看)，不要追加时间戳段落"
+//
+//	true 表示"明确非今天 (历史回看)，不要追加时间戳段落"
 func mustOpen(t time.Time, historical bool) {
 	s := storage.New()
 	path := s.PathFor(t)

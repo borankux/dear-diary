@@ -4,23 +4,23 @@ import (
 	"fmt"
 	"strings"
 
-	"dear-diary/internal/editor"
-	"dear-diary/internal/search"
-	"dear-diary/internal/storage"
+	"github.com/borankux/dear-diary/internal/editor"
+	"github.com/borankux/dear-diary/internal/search"
+	"github.com/borankux/dear-diary/internal/storage"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 type SearchModel struct {
-	store     *storage.Storage
-	results   []search.Result
-	keyword   string
-	cursor    int
-	offset    int
-	width     int
-	height    int
-	status    string
-	quitting  bool
+	store    *storage.Storage
+	results  []search.Result
+	keyword  string
+	cursor   int
+	offset   int
+	width    int
+	height   int
+	status   string
+	quitting bool
 }
 
 func NewSearchModel(s *storage.Storage, results []search.Result, keyword string) *SearchModel {

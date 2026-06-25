@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"dear-diary/internal/editor"
-	"dear-diary/internal/storage"
+	"github.com/borankux/dear-diary/internal/editor"
+	"github.com/borankux/dear-diary/internal/storage"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
