@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/borankux/dear-diary/internal/editor"
+	"github.com/borankux/dear-diary/internal/stats"
 	"github.com/borankux/dear-diary/internal/storage"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -174,12 +175,22 @@ func (m BrowseModel) View() string {
 
 	writtenCount := len(m.writtenDays)
 	totalDays := daysInMonth(m.year, m.month)
-	stats := lipgloss.NewStyle().
+
+	// 当前 streak（基于今天，跟当前显示月份无关）
+	streak := stats.CurrentStreak(m.store, time.Now())
+
+	var statsLine string
+	if streak > 0 {
+		statsLine = fmt.Sprintf("🔥 %d 天  ·  %d/%d 天", streak, writtenCount, totalDays)
+	} else {
+		statsLine = fmt.Sprintf("%d/%d 天", writtenCount, totalDays)
+	}
+	statsRender := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("11")).
-		Render(fmt.Sprintf("%d/%d 天", writtenCount, totalDays))
+		Render(statsLine)
 
 	// 把 title 和 stats 推到左右两端
-	header := padBetween(title, stats, width)
+	header := padBetween(title, statsRender, width)
 
 	// 分隔线
 	rule := strings.Repeat("─", width)

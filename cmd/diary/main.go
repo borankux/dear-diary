@@ -11,12 +11,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/borankux/dear-diary/internal/editor"
+	"github.com/borankux/dear-diary/internal/memory"
 	"github.com/borankux/dear-diary/internal/search"
+	"github.com/borankux/dear-diary/internal/stats"
 	"github.com/borankux/dear-diary/internal/storage"
 	"github.com/borankux/dear-diary/internal/tui"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 const usage = `亲爱的日记 — 一个 TUI 日记应用
 
@@ -45,6 +47,7 @@ func main() {
 	args := os.Args[1:]
 
 	if len(args) == 0 {
+		printDailyHighlight()
 		mustOpen(time.Now(), false)
 		return
 	}
@@ -81,6 +84,43 @@ func main() {
 		os.Exit(2)
 	}
 	mustOpen(d, true)
+}
+
+// printDailyHighlight 在打开今天的 Vim 前打印回顾信息：
+//   - 当前 streak（连续写作天数）
+//   - "X 年前的今天"的日记预览
+//
+// 静默处理：没数据就不打印任何东西，避免噪音。
+func printDailyHighlight() {
+	s := storage.New()
+	now := time.Now()
+
+	streak := stats.CurrentStreak(s, now)
+	memories := memory.OnThisDay(s, now, 10)
+
+	if streak == 0 && len(memories) == 0 {
+		return
+	}
+
+	fmt.Println()
+	if streak > 0 {
+		fmt.Printf("  🔥 连续写作 %d 天\n", streak)
+	}
+	for _, m := range memories {
+		weekdayCN := []string{"日", "一", "二", "三", "四", "五", "六"}
+		fmt.Printf("  📅 %d 年前的今天 (%s 周%s)\n", m.YearsAgo,
+			m.Date.Format("2006-01-02"), weekdayCN[int(m.Date.Weekday())])
+		fmt.Printf("     %s\n", truncate(m.FirstLine, 70))
+	}
+	fmt.Println()
+}
+
+func truncate(s string, maxLen int) string {
+	r := []rune(s)
+	if len(r) <= maxLen {
+		return s
+	}
+	return string(r[:maxLen-1]) + "…"
 }
 
 func runBrowse() error {
