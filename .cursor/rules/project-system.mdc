@@ -1,0 +1,46 @@
+---
+description: Apply at session start and when user says end session / review claude / sync wiki / status / organize files / change language. Defines the project memory stack behavior.
+---
+
+# 亲爱的日记 (dear-diary) — Project System Rules
+
+## Session Start
+1. Read PROJECT.md and session-handoff.md at the start of every conversation. Check the Language setting in CLAUDE.md to determine output language.
+2. Read logs (bounded): highest-level summaries in log/summaries/ + all unarchived raw logs in log/. Skip if log/ doesn't exist.
+
+## End Session Protocol
+When user says "end session" / "结束会话" / "收工":
+1. Write log/session-YYYY-MM-DD-{slug}.md (summary, decisions, outputs, next steps)
+2. Log Compaction — compact unarchived raw logs if count ≥ threshold (see Log Compaction Protocol)
+3. Update session-handoff.md (refresh progress, next steps)
+4. Update PROJECT.md if structure or module status changed
+5. Update TODO.md (mark completed tasks)
+6. Collect CLAUDE.md candidates → append to .claude/candidates.md
+7. File structure reorganization (incremental mode) — only process new/changed files, match against STRUCTURE.md rules, organize (create STRUCTURE.md if missing)
+7.5. Document archiving — read references/document-archiving.md, scan for document output, classify and archive to docs/, update DOCS.md index
+8. Evaluate and write update log — if significant changes, determine version bump level (major/minor/patch), calculate new version, prepend versioned entry to UPDATE_LOG.md; optionally offer GitHub Release
+9. Output summary in configured language
+
+## Triggers
+| Intent | Action |
+|--------|--------|
+| End session / wrap up (any language) | Write log, update handoff, sync wiki, check TODO, collect candidates, file reorganization, document archiving, evaluate update log, version bump, output summary |
+| Review constitution (any language) | Show .claude/candidates.md for user to confirm each entry |
+| Sync wiki (any language) | Force rescan and update PROJECT.md |
+| Check status (any language) | Read PROJECT.md + session-handoff.md summary aloud |
+| Organize files (any language) | Scan files and reorganize according to STRUCTURE.md rules |
+| Change language (any language) | Execute Language Change Protocol |
+
+## File Roles
+| File | Who writes | When |
+|------|-----------|------|
+| CLAUDE.md | Human only | review claude trigger |
+| PROJECT.md | AI auto | end session + structure changes |
+| session-handoff.md | AI auto | end session |
+| TODO.md | AI + Human | anytime |
+| log/session-*.md | AI | end session |
+| .claude/candidates.md | AI auto | when stable rules identified |
+| STRUCTURE.md | AI auto | end session + file structure changes |
+| .claude/.file-snapshot.json | AI auto | end session |
+| UPDATE_LOG.md | AI auto | end session + significant updates |
+| DOCS.md | AI auto | end session + document archiving |
