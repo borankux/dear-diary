@@ -48,7 +48,7 @@ func NewRunnerWithStore(rootDir, outDir, storePath string) (*Runner, error) {
 		extractor:    extractor,
 		deduplicator: NewDeduplicator(store),
 		writer:       NewSummaryWriter(outDir),
-		htmlWriter:   NewHTMLWriter(outDir),
+		htmlWriter:   NewHTMLWriter(outDir, rootDir),
 		extracted:    make(map[string]*Extracted),
 		deduped:      &DedupResult{},
 	}, nil
