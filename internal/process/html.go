@@ -1,6 +1,7 @@
 package process
 
 import (
+	"fmt"
 	"html/template"
 	"os"
 	"os/exec"
@@ -16,6 +17,14 @@ import (
 	"github.com/gomarkdown/markdown/parser"
 )
 
+const (
+	maxDashboardCandidates = 5
+	maxDashboardTodos      = 12
+	maxDashboardMemories   = 8
+	maxDashboardDiaries    = 7
+	diaryPagesDir          = "entries"
+)
+
 // HTMLWriter renders a compact, single-viewport dashboard to HTML.
 type HTMLWriter struct {
 	outDir  string
@@ -29,9 +38,60 @@ func NewHTMLWriter(outDir, rootDir string) *HTMLWriter {
 
 // DiaryEntry holds a rendered diary for the dashboard.
 type DiaryEntry struct {
-	Date    string
-	HTML    template.HTML
-	RawPath string
+	Date     string
+	Title    string
+	Excerpt  string
+	Sections []string
+	HTML     template.HTML
+	RawPath  string
+	Month    string
+	URL      string
+	Open     bool
+}
+
+// TodayStatus summarizes today's open loop for the dashboard.
+type TodayStatus struct {
+	Date     string
+	Exists   bool
+	Sections int
+}
+
+// CalendarMonth is a read-only month view for diary navigation.
+type CalendarMonth struct {
+	Month       string
+	Title       string
+	Count       int
+	DaysInMonth int
+	Open        bool
+	Days        []CalendarDay
+}
+
+// CalendarDay represents one visible cell in a Monday-first month grid.
+type CalendarDay struct {
+	Day       int
+	Date      string
+	URL       string
+	IsPadding bool
+	IsWritten bool
+	IsToday   bool
+}
+
+type dashboardData struct {
+	GeneratedAt       time.Time
+	Today             TodayStatus
+	CandidateCount    int
+	TodoCount         int
+	MemoryCount       int
+	DiaryCount        int
+	CandidateOverflow int
+	TodoOverflow      int
+	MemoryOverflow    int
+	DiaryOverflow     int
+	Candidates        []Candidate
+	Todos             []Todo
+	Memories          []Memory
+	Diaries           []DiaryEntry
+	CalendarMonths    []CalendarMonth
 }
 
 // WriteAll regenerates dashboard.html from the store and diary files.
@@ -48,27 +108,39 @@ func (w *HTMLWriter) WriteAll(store *Store) error {
 	if err != nil {
 		return err
 	}
+	candidates, err := store.ListPendingCandidates()
+	if err != nil {
+		return err
+	}
 	diaries, err := w.loadDiaries()
 	if err != nil {
 		return err
 	}
+	if err := w.writeDiaryPages(diaries); err != nil {
+		return err
+	}
 
-	data := struct {
-		GeneratedAt time.Time
-		TodoCount   int
-		MemoryCount int
-		DiaryCount  int
-		Todos       []Todo
-		Memories    []Memory
-		Diaries     []DiaryEntry
-	}{
-		GeneratedAt: time.Now(),
-		TodoCount:   len(todos),
-		MemoryCount: len(memories),
-		DiaryCount:  len(diaries),
-		Todos:       todos,
-		Memories:    memories,
-		Diaries:     diaries,
+	visibleCandidates, candidateOverflow := limitSlice(candidates, maxDashboardCandidates)
+	visibleTodos, todoOverflow := limitSlice(todos, maxDashboardTodos)
+	visibleMemories, memoryOverflow := limitSlice(memories, maxDashboardMemories)
+	visibleDiaries, diaryOverflow := limitSlice(diaries, maxDashboardDiaries)
+
+	data := dashboardData{
+		GeneratedAt:       time.Now(),
+		Today:             w.todayStatus(),
+		CandidateCount:    len(candidates),
+		TodoCount:         len(todos),
+		MemoryCount:       len(memories),
+		DiaryCount:        len(diaries),
+		CandidateOverflow: candidateOverflow,
+		TodoOverflow:      todoOverflow,
+		MemoryOverflow:    memoryOverflow,
+		DiaryOverflow:     diaryOverflow,
+		Candidates:        visibleCandidates,
+		Todos:             visibleTodos,
+		Memories:          visibleMemories,
+		Diaries:           visibleDiaries,
+		CalendarMonths:    buildCalendarMonths(diaries, time.Now()),
 	}
 
 	path := filepath.Join(w.outDir, "dashboard.html")
@@ -101,25 +173,212 @@ func (w *HTMLWriter) loadDiaries() ([]DiaryEntry, error) {
 
 	var entries []DiaryEntry
 	for _, path := range files {
+		if !storage.IsDiaryFilePath(path) {
+			continue
+		}
 		b, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
 		name := strings.TrimSuffix(filepath.Base(path), ".md")
+		title, body, sections, excerpt := summarizeDiary(b)
 		entries = append(entries, DiaryEntry{
-			Date:    name,
-			HTML:    renderMarkdown(b),
-			RawPath: path,
+			Date:     name,
+			Title:    title,
+			Excerpt:  excerpt,
+			Sections: sections,
+			HTML:     renderMarkdown(body),
+			RawPath:  path,
+			Month:    filepath.Base(filepath.Dir(path)),
+			URL:      filepath.ToSlash(filepath.Join(diaryPagesDir, name+".html")),
 		})
 	}
+	if len(entries) > 0 {
+		entries[0].Open = true
+	}
 	return entries, nil
+}
+
+func (w *HTMLWriter) writeDiaryPages(entries []DiaryEntry) error {
+	dir := filepath.Join(w.outDir, diaryPagesDir)
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmpl, err := template.New("diary-page").Parse(diaryPageTemplate)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Date+".html")
+		f, err := os.Create(path)
+		if err != nil {
+			return err
+		}
+		data := struct {
+			GeneratedAt time.Time
+			Entry       DiaryEntry
+		}{
+			GeneratedAt: time.Now(),
+			Entry:       entry,
+		}
+		execErr := tmpl.Execute(f, data)
+		closeErr := f.Close()
+		if execErr != nil {
+			return execErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	return nil
+}
+
+func (w *HTMLWriter) todayStatus() TodayStatus {
+	now := time.Now()
+	status := TodayStatus{Date: now.Format("2006-01-02")}
+	if w.rootDir == "" {
+		return status
+	}
+	path := storage.NewWithRoot(w.rootDir).PathFor(now)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return status
+	}
+	status.Exists = true
+	status.Sections = strings.Count(string(b), "\n## ")
+	if strings.HasPrefix(string(b), "## ") {
+		status.Sections++
+	}
+	return status
+}
+
+func limitSlice[T any](items []T, max int) ([]T, int) {
+	if len(items) <= max {
+		return items, 0
+	}
+	return items[:max], len(items) - max
+}
+
+func summarizeDiary(src []byte) (string, []byte, []string, string) {
+	text := strings.ReplaceAll(string(src), "\r\n", "\n")
+	lines := strings.Split(text, "\n")
+	title := ""
+	bodyStart := 0
+	if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), "# ") {
+		title = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[0]), "# "))
+		bodyStart = 1
+	}
+	if title == "" {
+		title = "Untitled diary"
+	}
+
+	var sections []string
+	var plainParts []string
+	for _, line := range lines[bodyStart:] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "## ") {
+			sections = append(sections, strings.TrimSpace(strings.TrimPrefix(trimmed, "## ")))
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		trimmed = strings.TrimPrefix(trimmed, "- ")
+		trimmed = strings.TrimPrefix(trimmed, "* ")
+		if trimmed != "" {
+			plainParts = append(plainParts, trimmed)
+		}
+	}
+
+	body := strings.TrimSpace(strings.Join(lines[bodyStart:], "\n"))
+	if body == "" {
+		body = text
+	}
+	excerpt := truncateText(strings.Join(plainParts, " "), 150)
+	return title, []byte(body), sections, excerpt
+}
+
+func truncateText(text string, limit int) string {
+	text = strings.Join(strings.Fields(text), " ")
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "..."
+}
+
+func buildCalendarMonths(diaries []DiaryEntry, now time.Time) []CalendarMonth {
+	written := make(map[string]DiaryEntry)
+	monthStarts := make(map[string]time.Time)
+	for _, entry := range diaries {
+		d, err := time.Parse("2006-01-02", entry.Date)
+		if err != nil {
+			continue
+		}
+		written[entry.Date] = entry
+		monthStarts[d.Format("2006-01")] = time.Date(d.Year(), d.Month(), 1, 0, 0, 0, 0, time.Local)
+	}
+	currentMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+	monthStarts[currentMonth.Format("2006-01")] = currentMonth
+
+	months := make([]string, 0, len(monthStarts))
+	for month := range monthStarts {
+		months = append(months, month)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(months)))
+
+	calendarMonths := make([]CalendarMonth, 0, len(months))
+	for i, month := range months {
+		start := monthStarts[month]
+		daysInMonth := time.Date(start.Year(), start.Month()+1, 0, 0, 0, 0, 0, time.Local).Day()
+		firstWeekday := (int(start.Weekday()) + 6) % 7
+		days := make([]CalendarDay, 0, firstWeekday+daysInMonth)
+		for p := 0; p < firstWeekday; p++ {
+			days = append(days, CalendarDay{IsPadding: true})
+		}
+		count := 0
+		for day := 1; day <= daysInMonth; day++ {
+			date := time.Date(start.Year(), start.Month(), day, 0, 0, 0, 0, time.Local)
+			dateString := date.Format("2006-01-02")
+			entry, ok := written[dateString]
+			if ok {
+				count++
+			}
+			days = append(days, CalendarDay{
+				Day:       day,
+				Date:      dateString,
+				URL:       entry.URL,
+				IsWritten: ok,
+				IsToday:   sameCalendarDay(date, now),
+			})
+		}
+		calendarMonths = append(calendarMonths, CalendarMonth{
+			Month:       month,
+			Title:       fmt.Sprintf("%d 年 %d 月", start.Year(), int(start.Month())),
+			Count:       count,
+			DaysInMonth: daysInMonth,
+			Open:        i == 0,
+			Days:        days,
+		})
+	}
+	return calendarMonths
+}
+
+func sameCalendarDay(a, b time.Time) bool {
+	return a.Year() == b.Year() && a.Month() == b.Month() && a.Day() == b.Day()
 }
 
 func renderMarkdown(src []byte) template.HTML {
 	extensions := parser.CommonExtensions | parser.AutoHeadingIDs
 	p := parser.NewWithExtensions(extensions)
 	doc := p.Parse(src)
-	opts := html.RendererOptions{Flags: html.CommonFlags | html.HrefTargetBlank}
+	opts := html.RendererOptions{Flags: html.CommonFlags | html.HrefTargetBlank | html.SkipHTML}
 	renderer := html.NewRenderer(opts)
 	return template.HTML(markdown.Render(doc, renderer))
 }
@@ -176,259 +435,446 @@ const dashboardTemplate = `<!DOCTYPE html>
 	<title>Dear Diary Dashboard</title>
 	<style>
 		:root {
-			--bg: #0a0a0f;
-			--surface: #14141b;
-			--surface-2: #1c1c25;
-			--surface-3: #252530;
-			--text: #f0f0f5;
-			--muted: #8a8a98;
-			--accent: #6366f1;
-			--todo: #f59e0b;
-			--memory: #8b5cf6;
-			--diary: #10b981;
-			--shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 24px rgba(0,0,0,0.4);
-			--radius-outer: 16px;
-			--radius-inner: 12px;
-			--radius-button: 8px;
+			color-scheme: light;
+			--bg: #f6f7f8;
+			--paper: #ffffff;
+			--ink: #202124;
+			--text: #31343a;
+			--muted: #727780;
+			--quiet: #eef0f3;
+			--line: #dfe3e8;
+			--line-strong: #c7cdd5;
+			--accent: #0f766e;
+			--attention: #b45309;
+			--memory: #475569;
+			--danger: #b91c1c;
+			--radius: 8px;
+			--shadow: 0 1px 2px rgba(30, 41, 59, 0.08);
 		}
 		* { box-sizing: border-box; }
 		html, body {
 			margin: 0;
 			padding: 0;
-			height: 100%;
-			overflow: hidden;
 		}
 		body {
-			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+			font-family: "Avenir Next", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
 			background: var(--bg);
-			color: var(--text);
+			color: var(--ink);
 			-webkit-font-smoothing: antialiased;
 			-moz-osx-font-smoothing: grayscale;
 			text-wrap: pretty;
 		}
 		.app {
-			display: flex;
-			flex-direction: column;
-			height: 100vh;
-			padding: 16px;
-			gap: 16px;
+			width: min(1320px, calc(100% - 32px));
+			margin: 0 auto;
+			padding: 28px 0 48px;
 		}
 		header {
 			display: flex;
-			align-items: center;
+			align-items: flex-end;
 			justify-content: space-between;
-			flex-shrink: 0;
-			padding: 0 4px;
+			gap: 24px;
+			padding-bottom: 18px;
+			border-bottom: 1px solid var(--line);
 		}
 		header h1 {
 			margin: 0;
-			font-size: 1.25rem;
+			font-size: 1.6rem;
 			font-weight: 700;
-			letter-spacing: -0.02em;
-			text-wrap: balance;
+			letter-spacing: 0;
 		}
-		header .meta {
+		.kicker,
+		header .meta,
+		.overflow-note,
+		.source,
+		.entry-meta,
+		.month-count {
 			color: var(--muted);
-			font-size: 0.75rem;
+			font-size: 0.78rem;
 			font-variant-numeric: tabular-nums;
 		}
-		.stats {
-			display: flex;
-			gap: 12px;
-			flex-shrink: 0;
+		.kicker {
+			margin-bottom: 4px;
+			text-transform: uppercase;
+			font-size: 0.68rem;
+			font-weight: 800;
+			letter-spacing: 0.08em;
 		}
-		.stat {
-			background: var(--surface);
-			border-radius: var(--radius-button);
-			padding: 8px 14px;
-			box-shadow: var(--shadow);
-			font-size: 0.75rem;
-			color: var(--muted);
-			min-width: 72px;
-			text-align: center;
-			transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1);
+		.briefing {
+			padding: 22px 0 24px;
+			border-bottom: 1px solid var(--line);
 		}
-		.stat:active { transform: scale(0.96); }
-		.stat .num {
-			display: block;
-			font-size: 1.125rem;
+		.briefing h2 {
+			margin: 0;
+			font-size: clamp(1.55rem, 2vw, 2.25rem);
+			line-height: 1.18;
 			font-weight: 700;
+		}
+		.briefing p {
+			max-width: 860px;
+			margin: 10px 0 0;
 			color: var(--text);
+			font-size: 1rem;
+			line-height: 1.55;
+		}
+		.metric-row {
+			display: grid;
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+			gap: 10px;
+			margin-top: 18px;
+		}
+		.metric {
+			background: var(--paper);
+			border: 1px solid var(--line);
+			border-radius: var(--radius);
+			padding: 12px 14px;
+			box-shadow: var(--shadow);
+		}
+		.metric strong {
+			display: block;
+			font-size: 1.45rem;
+			line-height: 1;
 			font-variant-numeric: tabular-nums;
 		}
-		.stat.todo .num { color: var(--todo); }
-		.stat.memory .num { color: var(--memory); }
-		.stat.diary .num { color: var(--diary); }
-		.grid {
-			display: grid;
-			grid-template-columns: 1fr 1fr 1.4fr;
-			gap: 16px;
-			flex: 1;
-			min-height: 0;
+		.metric span {
+			display: block;
+			margin-top: 5px;
+			color: var(--muted);
+			font-size: 0.78rem;
 		}
-		.column {
+		.content-grid {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) 360px;
+			gap: 28px;
+			margin-top: 28px;
+			align-items: start;
+			min-width: 0;
+		}
+		main,
+		aside,
+		.section,
+		.diary-entry {
+			min-width: 0;
+		}
+		.section {
+			padding-top: 18px;
+			border-top: 1px solid var(--line);
+		}
+		.section + .section {
+			margin-top: 30px;
+		}
+		.section-header {
 			display: flex;
-			flex-direction: column;
-			min-height: 0;
-			background: var(--surface);
-			border-radius: var(--radius-outer);
+			align-items: baseline;
+			justify-content: space-between;
+			gap: 16px;
+			margin-bottom: 12px;
+			min-width: 0;
+		}
+		.section h2 {
+			margin: 0;
+			font-size: 0.95rem;
+			font-weight: 800;
+			letter-spacing: 0;
+		}
+		.calendar-months {
+			display: grid;
+			gap: 12px;
+		}
+		.calendar-month {
+			background: var(--paper);
+			border: 1px solid var(--line);
+			border-radius: var(--radius);
 			box-shadow: var(--shadow);
 			overflow: hidden;
-			animation: fadeIn 0.5s cubic-bezier(0.2, 0, 0, 1) both;
+			min-width: 0;
 		}
-		.column:nth-child(1) { animation-delay: 0ms; }
-		.column:nth-child(2) { animation-delay: 80ms; }
-		.column:nth-child(3) { animation-delay: 160ms; }
-		.column-header {
+		.calendar-month summary {
+			list-style: none;
+			cursor: pointer;
 			display: flex;
-			align-items: center;
+			align-items: baseline;
 			justify-content: space-between;
-			padding: 14px 16px;
-			border-bottom: 1px solid var(--surface-3);
-			flex-shrink: 0;
+			gap: 12px;
+			padding: 13px 14px;
+			border-bottom: 1px solid var(--line);
 		}
-		.column-header h2 {
-			margin: 0;
-			font-size: 0.875rem;
-			font-weight: 600;
+		.calendar-month summary::-webkit-details-marker { display: none; }
+		.calendar-month strong {
+			font-size: 0.92rem;
+			font-variant-numeric: tabular-nums;
+		}
+		.calendar-weekdays,
+		.calendar-grid {
+			display: grid;
+			grid-template-columns: repeat(7, minmax(0, 1fr));
+			gap: 4px;
+		}
+		.calendar-weekdays {
+			padding: 12px 14px 0;
+			color: var(--muted);
+			font-size: 0.72rem;
+			font-weight: 800;
+			text-align: center;
+		}
+		.calendar-grid {
+			padding: 8px 14px 14px;
+		}
+		.calendar-cell {
+			min-width: 0;
+			min-height: 46px;
+			border: 1px solid var(--line);
+			border-radius: 7px;
+			padding: 6px;
+			background: #fbfcfd;
+			color: var(--muted);
+			font-size: 0.78rem;
+			font-variant-numeric: tabular-nums;
+			text-decoration: none;
+		}
+		.calendar-cell.is-padding {
+			visibility: hidden;
+		}
+		.calendar-day {
 			display: flex;
-			align-items: center;
-			gap: 8px;
+			flex-direction: column;
+			gap: 5px;
+			justify-content: space-between;
 		}
-		.column-header .badge {
-			font-size: 0.6875rem;
+		.calendar-day.is-written {
+			background: #e9f7f3;
+			border-color: #b8ddd3;
+			color: var(--accent);
+			font-weight: 800;
+		}
+		.calendar-day.is-today {
+			border-color: var(--attention);
+			color: var(--attention);
+		}
+		.calendar-day small {
+			color: inherit;
+			font-size: 0.65rem;
 			font-weight: 700;
+			white-space: nowrap;
+		}
+		.diary-entry {
+			background: var(--paper);
+			border: 1px solid var(--line);
+			border-radius: var(--radius);
+			box-shadow: var(--shadow);
+			margin-bottom: 14px;
+			overflow: hidden;
+		}
+		.diary-entry summary {
+			list-style: none;
+			cursor: pointer;
+			padding: 18px 20px;
+			display: grid;
+			grid-template-columns: 1fr auto;
+			gap: 16px;
+			align-items: start;
+			min-width: 0;
+		}
+		.diary-entry summary > div {
+			min-width: 0;
+		}
+		.diary-entry summary::-webkit-details-marker { display: none; }
+		.entry-title {
+			margin: 0;
+			font-size: 1.05rem;
+			line-height: 1.25;
+			font-weight: 800;
+			overflow-wrap: anywhere;
+		}
+		.entry-excerpt {
+			margin: 7px 0 0;
+			color: var(--muted);
+			font-size: 0.88rem;
+			line-height: 1.45;
+			overflow-wrap: anywhere;
+		}
+		.entry-link {
+			color: var(--accent);
+			text-decoration: none;
+			font-weight: 800;
+		}
+		.entry-link:hover {
+			text-decoration: underline;
+		}
+		.section-pills {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 6px;
+			padding: 0 20px 16px;
+			min-width: 0;
+		}
+		.pill {
+			display: inline-flex;
+			align-items: center;
+			min-height: 24px;
+			max-width: 100%;
 			padding: 3px 8px;
 			border-radius: 999px;
-			background: var(--surface-3);
+			background: var(--quiet);
 			color: var(--muted);
+			font-size: 0.72rem;
 			font-variant-numeric: tabular-nums;
 		}
-		.column-content {
-			flex: 1;
-			overflow-y: auto;
-			padding: 12px;
-			min-height: 0;
-		}
-		.todo-item {
-			display: flex;
-			align-items: flex-start;
-			gap: 10px;
-			padding: 10px 12px;
-			border-radius: var(--radius-button);
-			background: var(--surface-2);
-			margin-bottom: 8px;
-			transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1), background 0.15s ease;
-		}
-		.todo-item:hover { background: var(--surface-3); }
-		.todo-item:active { transform: scale(0.98); }
-		.todo-item input[type="checkbox"] {
-			appearance: none;
-			width: 18px;
-			height: 18px;
-			border-radius: 5px;
-			border: 2px solid var(--surface-3);
-			background: var(--surface-3);
-			margin-top: 2px;
-			flex-shrink: 0;
-			cursor: pointer;
-			transition: border-color 0.15s ease, background 0.15s ease;
-		}
-		.todo-item input[type="checkbox"]:checked {
-			background: var(--todo);
-			border-color: var(--todo);
-		}
-		.todo-item .text {
-			font-size: 0.8125rem;
-			line-height: 1.5;
-		}
-		.memory-item {
-			padding: 12px;
-			border-radius: var(--radius-button);
-			background: var(--surface-2);
-			margin-bottom: 8px;
-			transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1), background 0.15s ease;
-		}
-		.memory-item:hover { background: var(--surface-3); }
-		.memory-item:active { transform: scale(0.98); }
-		.memory-item .topic {
-			font-size: 0.8125rem;
-			font-weight: 600;
-			color: var(--memory);
-			margin-bottom: 4px;
-		}
-		.memory-item .summary {
-			font-size: 0.75rem;
+		.markdown {
+			border-top: 1px solid var(--line);
+			padding: 22px 20px 28px;
+			font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+			font-size: 1.03rem;
+			line-height: 1.72;
 			color: var(--text);
-			line-height: 1.5;
+			max-width: 780px;
+			min-width: 0;
+			overflow-wrap: anywhere;
 		}
-		.diary-item {
-			padding: 14px;
-			border-radius: var(--radius-inner);
-			background: var(--surface-2);
-			margin-bottom: 12px;
-			transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1), background 0.15s ease;
+		.markdown h1 { display: none; }
+		.markdown h2,
+		.markdown h3 {
+			font-family: "Avenir Next", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+			font-size: 0.88rem;
+			line-height: 1.3;
+			margin: 1.6rem 0 0.65rem;
+			padding-top: 0.9rem;
+			border-top: 1px solid var(--line);
+			color: var(--ink);
+			font-weight: 800;
 		}
-		.diary-item:hover { background: var(--surface-3); }
-		.diary-item:active { transform: scale(0.99); }
-		.diary-item .date {
-			font-size: 0.75rem;
-			font-weight: 600;
-			color: var(--diary);
-			margin-bottom: 8px;
-			font-variant-numeric: tabular-nums;
+		.markdown h2:first-child,
+		.markdown h3:first-child {
+			margin-top: 0;
+			padding-top: 0;
+			border-top: 0;
 		}
-		.diary-item .body {
-			font-size: 0.8125rem;
-			line-height: 1.6;
+		.markdown p { margin: 0.75rem 0; }
+		.markdown ul,
+		.markdown ol {
+			margin: 0.75rem 0;
+			padding-left: 1.3rem;
 		}
-		.diary-item .body h1,
-		.diary-item .body h2,
-		.diary-item .body h3 {
-			font-size: 0.875rem;
-			margin: 0.75rem 0 0.4rem;
-			color: var(--text);
+		.markdown li { margin: 0.35rem 0; }
+		.markdown blockquote {
+			margin: 1rem 0;
+			padding: 0 0 0 1rem;
+			border-left: 2px solid var(--line-strong);
+			color: #4b5563;
 		}
-		.diary-item .body p { margin: 0.4rem 0; }
-		.diary-item .body ul, .diary-item .body ol {
-			margin: 0.4rem 0;
-			padding-left: 1.25rem;
-		}
-		.diary-item .body li { margin: 0.15rem 0; }
-		.diary-item .body code {
-			background: var(--surface-3);
-			padding: 2px 5px;
+		.markdown code {
+			background: var(--quiet);
 			border-radius: 4px;
-			font-size: 0.75rem;
+			padding: 0.1rem 0.28rem;
+			font-family: "SF Mono", Menlo, Consolas, monospace;
+			font-size: 0.88em;
+		}
+		.markdown pre {
+			overflow-x: auto;
+			background: #111827;
+			color: #f8fafc;
+			border-radius: var(--radius);
+			padding: 14px;
+		}
+		.markdown pre code {
+			background: transparent;
+			color: inherit;
+			padding: 0;
+		}
+		.markdown table {
+			width: 100%;
+			border-collapse: collapse;
+			margin: 1rem 0;
+			font-family: "Avenir Next", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+			font-size: 0.88rem;
+		}
+		.markdown img {
+			max-width: 100%;
+			height: auto;
+		}
+		.markdown th,
+		.markdown td {
+			border-bottom: 1px solid var(--line);
+			padding: 8px 10px;
+			text-align: left;
+			vertical-align: top;
+		}
+		.item-list {
+			display: flex;
+			flex-direction: column;
+			gap: 8px;
+		}
+		.item {
+			background: var(--paper);
+			border: 1px solid var(--line);
+			border-radius: var(--radius);
+			padding: 12px 13px;
+			box-shadow: var(--shadow);
+			min-width: 0;
+			overflow-wrap: anywhere;
+		}
+		.item strong {
+			display: block;
+			font-size: 0.86rem;
+			line-height: 1.38;
+			font-weight: 800;
+		}
+		.item p {
+			margin: 6px 0 0;
+			color: var(--text);
+			font-size: 0.82rem;
+			line-height: 1.45;
+		}
+		.item .type {
+			display: inline-block;
+			margin-bottom: 6px;
+			color: var(--accent);
+			font-size: 0.7rem;
+			font-weight: 800;
+			text-transform: uppercase;
+			font-variant-numeric: tabular-nums;
+		}
+		.todo-id {
+			color: var(--attention);
+			font-weight: 800;
+			font-variant-numeric: tabular-nums;
+		}
+		.memory-topic {
+			color: var(--memory);
 		}
 		.empty {
+			background: var(--paper);
+			border: 1px dashed var(--line-strong);
+			border-radius: var(--radius);
 			color: var(--muted);
-			font-size: 0.8125rem;
-			text-align: center;
-			padding: 2rem 1rem;
-			font-style: italic;
+			font-size: 0.86rem;
+			padding: 18px;
 		}
 		.source {
-			font-size: 0.6875rem;
-			color: var(--muted);
-			margin-top: 6px;
+			margin-top: 7px;
+			overflow-wrap: anywhere;
 		}
-		::-webkit-scrollbar { width: 6px; }
-		::-webkit-scrollbar-track { background: transparent; }
-		::-webkit-scrollbar-thumb {
-			background: var(--surface-3);
-			border-radius: 3px;
+		@media (max-width: 980px) {
+			.app { width: min(100% - 24px, 760px); padding-top: 20px; }
+			header { align-items: flex-start; flex-direction: column; gap: 8px; }
+			.metric-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+			.content-grid { grid-template-columns: 1fr; gap: 18px; }
 		}
-		@keyframes fadeIn {
-			from { opacity: 0; transform: translateY(12px); }
-			to { opacity: 1; transform: translateY(0); }
+		@media (max-width: 560px) {
+			.app { width: min(100% - 20px, 760px); }
+			.metric-row { grid-template-columns: 1fr; }
+			.section-header { align-items: flex-start; flex-direction: column; gap: 4px; }
+			.calendar-month summary { align-items: flex-start; flex-direction: column; gap: 4px; }
+			.calendar-grid { gap: 3px; padding-left: 10px; padding-right: 10px; }
+			.calendar-weekdays { padding-left: 10px; padding-right: 10px; }
+			.calendar-cell { min-height: 42px; padding: 5px; }
+			.calendar-day small { display: none; }
+			.diary-entry summary { grid-template-columns: 1fr; }
+			.markdown { font-size: 1rem; padding: 18px 16px 22px; }
+			.section-pills { padding-left: 16px; padding-right: 16px; }
 		}
-		@media (max-width: 900px) {
-			.grid {
-				grid-template-columns: 1fr;
-				grid-template-rows: 1fr 1fr 1.5fr;
-			}
-			.stats { display: none; }
+		@media (prefers-reduced-motion: reduce) {
+			* { scroll-behavior: auto; }
 		}
 	</style>
 </head>
@@ -436,75 +882,338 @@ const dashboardTemplate = `<!DOCTYPE html>
 	<div class="app">
 		<header>
 			<div>
-				<h1>📓 Dear Diary</h1>
-				<div class="meta">Generated {{.GeneratedAt.Format "2006-01-02 15:04"}}</div>
+				<div class="kicker">Read-only dashboard</div>
+				<h1>Dear Diary</h1>
 			</div>
-			<div class="stats">
-				<div class="stat todo"><span class="num">{{.TodoCount}}</span>Todo</div>
-				<div class="stat memory"><span class="num">{{.MemoryCount}}</span>Memory</div>
-				<div class="stat diary"><span class="num">{{.DiaryCount}}</span>Diary</div>
-			</div>
+			<div class="meta">Generated {{.GeneratedAt.Format "2006-01-02 15:04"}}</div>
 		</header>
-		<div class="grid">
-			<div class="column">
-				<div class="column-header">
-					<h2>📝 Todos</h2>
-					<span class="badge">{{.TodoCount}}</span>
-				</div>
-				<div class="column-content">
-					{{if .Todos}}
-						{{range .Todos}}
-						<label class="todo-item">
-							<input type="checkbox">
-							<div>
-								<div class="text">{{.Text}}</div>
-								{{if .SourceFile}}<div class="source">{{.SourceFile}}</div>{{end}}
+
+		<section class="briefing" aria-labelledby="briefing-title">
+			<h2 id="briefing-title">
+				{{if .Today.Exists}}今天已写 {{.Today.Sections}} 段。{{else}}今天还没有写日记。{{end}}
+				{{if .CandidateCount}}{{.CandidateCount}} 条候选需要看。{{else}}没有待确认候选。{{end}}
+			</h2>
+			<p>
+				当前有 {{.TodoCount}} 个 active todos、{{.MemoryCount}} 条长期记忆、{{.DiaryCount}} 篇日记。
+				这个页面只做阅读和判断重点：月历负责进入每天的日记，最近日记优先，注意力队列限量展示。
+			</p>
+			<div class="metric-row" aria-label="Dashboard counts">
+				<div class="metric"><strong>{{.CandidateCount}}</strong><span>候选待确认</span></div>
+				<div class="metric"><strong>{{.TodoCount}}</strong><span>Active todos</span></div>
+				<div class="metric"><strong>{{.MemoryCount}}</strong><span>长期记忆</span></div>
+				<div class="metric"><strong>{{.DiaryCount}}</strong><span>日记总数</span></div>
+			</div>
+		</section>
+
+		<div class="content-grid">
+			<main>
+				<section class="section" aria-labelledby="calendar-title">
+					<div class="section-header">
+						<h2 id="calendar-title">日历入口</h2>
+						<div class="meta">周一开头 · 点击有标记的日期打开日记页</div>
+					</div>
+					{{if .CalendarMonths}}
+					<div class="calendar-months">
+						{{range .CalendarMonths}}
+						<details class="calendar-month" {{if .Open}}open{{end}}>
+							<summary>
+								<strong>{{.Title}}</strong>
+								<span class="month-count">{{.Count}}/{{.DaysInMonth}} 天</span>
+							</summary>
+							<div class="calendar-weekdays" aria-hidden="true">
+								<span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
 							</div>
-						</label>
+							<div class="calendar-grid">
+								{{range .Days}}
+									{{if .IsPadding}}
+										<span class="calendar-cell is-padding"></span>
+									{{else if .IsWritten}}
+										<a class="calendar-cell calendar-day is-written{{if .IsToday}} is-today{{end}}" href="{{.URL}}" aria-label="打开 {{.Date}} 日记">
+											<span>{{.Day}}</span>
+											<small>{{if .IsToday}}◆ 今天{{else}}● 日记{{end}}</small>
+										</a>
+									{{else}}
+										<span class="calendar-cell calendar-day{{if .IsToday}} is-today{{end}}" aria-label="{{.Date}} 没有日记">
+											<span>{{.Day}}</span>
+											<small>{{if .IsToday}}◆ 今天{{end}}</small>
+										</span>
+									{{end}}
+								{{end}}
+							</div>
+						</details>
 						{{end}}
+					</div>
 					{{else}}
-						<div class="empty">No active todos</div>
+						<div class="empty">暂无日历数据。</div>
 					{{end}}
-				</div>
-			</div>
-			<div class="column">
-				<div class="column-header">
-					<h2>🧠 Memories</h2>
-					<span class="badge">{{.MemoryCount}}</span>
-				</div>
-				<div class="column-content">
-					{{if .Memories}}
-						{{range .Memories}}
-						<div class="memory-item">
-							<div class="topic">{{.Topic}}</div>
-							<div class="summary">{{.Summary}}</div>
-							{{if .SourceFile}}<div class="source">{{.SourceFile}}</div>{{end}}
-						</div>
-						{{end}}
-					{{else}}
-						<div class="empty">No memories yet</div>
-					{{end}}
-				</div>
-			</div>
-			<div class="column">
-				<div class="column-header">
-					<h2>📄 Diaries</h2>
-					<span class="badge">{{.DiaryCount}}</span>
-				</div>
-				<div class="column-content">
+				</section>
+
+				<section class="section" aria-labelledby="diary-title">
+					<div class="section-header">
+						<h2 id="diary-title">最近日记</h2>
+						<div class="meta">显示最近 {{len .Diaries}} 篇{{if .DiaryOverflow}}，完整历史从日历进入{{end}}</div>
+					</div>
 					{{if .Diaries}}
 						{{range .Diaries}}
-						<div class="diary-item">
-							<div class="date">{{.Date}}</div>
-							<div class="body">{{.HTML}}</div>
-						</div>
+						<details class="diary-entry" {{if .Open}}open{{end}}>
+							<summary>
+								<div>
+									<h3 class="entry-title">{{.Title}}</h3>
+									{{if .Excerpt}}<p class="entry-excerpt">{{.Excerpt}}</p>{{end}}
+								</div>
+								<div class="entry-meta">{{.Date}} · {{len .Sections}} 段 · <a class="entry-link" href="{{.URL}}">打开日记页</a></div>
+							</summary>
+							{{if .Sections}}
+							<div class="section-pills" aria-label="Diary sections">
+								{{range .Sections}}<span class="pill">{{.}}</span>{{end}}
+							</div>
+							{{end}}
+							<div class="markdown">{{.HTML}}</div>
+						</details>
 						{{end}}
 					{{else}}
-						<div class="empty">No diaries found</div>
+						<div class="empty">还没有找到 canonical diary 文件。</div>
 					{{end}}
-				</div>
-			</div>
+				</section>
+			</main>
+
+			<aside>
+				<section class="section" aria-labelledby="candidate-title">
+					<div class="section-header">
+						<h2 id="candidate-title">候选待确认</h2>
+						<div class="meta">{{.CandidateCount}}</div>
+					</div>
+					{{if .Candidates}}
+					<div class="item-list">
+						{{range .Candidates}}
+						<div class="item">
+							<span class="type">{{.Type}} #{{.ID}}</span>
+							<strong>{{if .Title}}{{.Title}}{{else}}{{.Content}}{{end}}</strong>
+							{{if .EvidenceText}}<p>{{.EvidenceText}}</p>{{end}}
+							{{if .SourceDate}}<div class="source">{{.SourceDate}}</div>{{end}}
+						</div>
+						{{end}}
+					</div>
+					{{if .CandidateOverflow}}<p class="overflow-note">还有 {{.CandidateOverflow}} 条候选没有显示。</p>{{end}}
+					{{else}}
+						<div class="empty">没有待确认候选。</div>
+					{{end}}
+				</section>
+
+				<section class="section" aria-labelledby="todo-title">
+					<div class="section-header">
+						<h2 id="todo-title">Active todos</h2>
+						<div class="meta">{{.TodoCount}}</div>
+					</div>
+					{{if .Todos}}
+					<div class="item-list">
+						{{range .Todos}}
+						<div class="item">
+							<strong><span class="todo-id">#{{.ID}}</span> {{.Text}}</strong>
+							{{if .EvidenceText}}<p>{{.EvidenceText}}</p>{{end}}
+							{{if .SourceDate}}<div class="source">{{.SourceDate}}</div>{{else if .SourceFile}}<div class="source">{{.SourceFile}}</div>{{end}}
+						</div>
+						{{end}}
+					</div>
+					{{if .TodoOverflow}}<p class="overflow-note">只显示最近 {{len .Todos}} 个，还有 {{.TodoOverflow}} 个未显示。</p>{{end}}
+					{{else}}
+						<div class="empty">没有 active todo。</div>
+					{{end}}
+				</section>
+
+				<section class="section" aria-labelledby="memory-title">
+					<div class="section-header">
+						<h2 id="memory-title">长期记忆</h2>
+						<div class="meta">{{.MemoryCount}}</div>
+					</div>
+					{{if .Memories}}
+					<div class="item-list">
+						{{range .Memories}}
+						<div class="item">
+							<strong class="memory-topic">{{.Topic}}</strong>
+							<p>{{.Summary}}</p>
+							{{if .SourceDate}}<div class="source">{{.SourceDate}}</div>{{else if .SourceFile}}<div class="source">{{.SourceFile}}</div>{{end}}
+						</div>
+						{{end}}
+					</div>
+					{{if .MemoryOverflow}}<p class="overflow-note">还有 {{.MemoryOverflow}} 条记忆没有显示。</p>{{end}}
+					{{else}}
+						<div class="empty">还没有长期记忆。</div>
+					{{end}}
+				</section>
+			</aside>
 		</div>
+	</div>
+</body>
+</html>
+`
+
+const diaryPageTemplate = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>{{.Entry.Title}} · Dear Diary</title>
+	<style>
+		:root {
+			color-scheme: light;
+			--bg: #f6f7f8;
+			--paper: #ffffff;
+			--ink: #202124;
+			--text: #31343a;
+			--muted: #727780;
+			--quiet: #eef0f3;
+			--line: #dfe3e8;
+			--line-strong: #c7cdd5;
+			--accent: #0f766e;
+			--radius: 8px;
+			--shadow: 0 1px 2px rgba(30, 41, 59, 0.08);
+		}
+		* { box-sizing: border-box; }
+		body {
+			margin: 0;
+			background: var(--bg);
+			color: var(--ink);
+			font-family: "Avenir Next", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+			-webkit-font-smoothing: antialiased;
+			-moz-osx-font-smoothing: grayscale;
+		}
+		.page {
+			width: min(860px, calc(100% - 32px));
+			margin: 0 auto;
+			padding: 28px 0 56px;
+		}
+		header {
+			padding-bottom: 18px;
+			border-bottom: 1px solid var(--line);
+		}
+		.back {
+			color: var(--accent);
+			font-size: 0.84rem;
+			font-weight: 800;
+			text-decoration: none;
+		}
+		.back:hover { text-decoration: underline; }
+		h1 {
+			margin: 14px 0 6px;
+			font-size: clamp(1.6rem, 4vw, 2.4rem);
+			line-height: 1.15;
+			letter-spacing: 0;
+		}
+		.meta {
+			color: var(--muted);
+			font-size: 0.82rem;
+			font-variant-numeric: tabular-nums;
+		}
+		.section-pills {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 6px;
+			margin-top: 16px;
+		}
+		.pill {
+			display: inline-flex;
+			align-items: center;
+			min-height: 24px;
+			padding: 3px 8px;
+			border-radius: 999px;
+			background: var(--quiet);
+			color: var(--muted);
+			font-size: 0.72rem;
+			font-variant-numeric: tabular-nums;
+		}
+		.article {
+			margin-top: 22px;
+			background: var(--paper);
+			border: 1px solid var(--line);
+			border-radius: var(--radius);
+			box-shadow: var(--shadow);
+			padding: 30px;
+			min-width: 0;
+		}
+		.markdown {
+			font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+			font-size: 1.08rem;
+			line-height: 1.76;
+			color: var(--text);
+			overflow-wrap: anywhere;
+		}
+		.markdown h1 { display: none; }
+		.markdown h2,
+		.markdown h3 {
+			font-family: "Avenir Next", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+			font-size: 0.92rem;
+			line-height: 1.3;
+			margin: 1.8rem 0 0.7rem;
+			padding-top: 1rem;
+			border-top: 1px solid var(--line);
+			color: var(--ink);
+			font-weight: 800;
+		}
+		.markdown h2:first-child,
+		.markdown h3:first-child {
+			margin-top: 0;
+			padding-top: 0;
+			border-top: 0;
+		}
+		.markdown p { margin: 0.8rem 0; }
+		.markdown ul,
+		.markdown ol {
+			margin: 0.8rem 0;
+			padding-left: 1.35rem;
+		}
+		.markdown li { margin: 0.35rem 0; }
+		.markdown blockquote {
+			margin: 1rem 0;
+			padding: 0 0 0 1rem;
+			border-left: 2px solid var(--line-strong);
+			color: #4b5563;
+		}
+		.markdown code {
+			background: var(--quiet);
+			border-radius: 4px;
+			padding: 0.1rem 0.28rem;
+			font-family: "SF Mono", Menlo, Consolas, monospace;
+			font-size: 0.88em;
+		}
+		.markdown pre {
+			overflow-x: auto;
+			background: #111827;
+			color: #f8fafc;
+			border-radius: var(--radius);
+			padding: 14px;
+		}
+		.markdown pre code {
+			background: transparent;
+			color: inherit;
+			padding: 0;
+		}
+		.markdown img {
+			max-width: 100%;
+			height: auto;
+		}
+		@media (max-width: 560px) {
+			.page { width: min(100% - 20px, 860px); padding-top: 20px; }
+			.article { padding: 20px 16px; }
+			.markdown { font-size: 1rem; }
+		}
+	</style>
+</head>
+<body>
+	<div class="page">
+		<header>
+			<a class="back" href="../dashboard.html">返回 Dashboard</a>
+			<h1>{{.Entry.Title}}</h1>
+			<div class="meta">{{.Entry.Date}} · {{len .Entry.Sections}} 段 · Generated {{.GeneratedAt.Format "2006-01-02 15:04"}}</div>
+			{{if .Entry.Sections}}
+			<div class="section-pills" aria-label="Diary sections">
+				{{range .Entry.Sections}}<span class="pill">{{.}}</span>{{end}}
+			</div>
+			{{end}}
+		</header>
+		<article class="article">
+			<div class="markdown">{{.Entry.HTML}}</div>
+		</article>
 	</div>
 </body>
 </html>

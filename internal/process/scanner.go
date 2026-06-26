@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/borankux/dear-diary/internal/storage"
 )
 
 // Scanner discovers diary markdown files and computes their content hashes.
@@ -27,7 +29,7 @@ func (sc *Scanner) AllFiles() ([]FileInfo, error) {
 			// Ignore permission errors and continue.
 			return nil
 		}
-		if info.IsDir() || !isDiaryFile(path) {
+		if info.IsDir() || !storage.IsDiaryFilePath(path) {
 			return nil
 		}
 
@@ -67,17 +69,4 @@ func (sc *Scanner) RecentFiles(days int) ([]FileInfo, error) {
 		}
 	}
 	return recent, nil
-}
-
-func isDiaryFile(path string) bool {
-	name := filepath.Base(path)
-	if filepath.Ext(name) != ".md" {
-		return false
-	}
-	// Expect YYYY-MM-DD.md naming.
-	if len(name) != len("YYYY-MM-DD.md") {
-		return false
-	}
-	_, err := time.Parse("2006-01-02.md", name)
-	return err == nil
 }

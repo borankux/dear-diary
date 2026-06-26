@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/borankux/dear-diary/internal/storage"
 	"github.com/google/uuid"
 )
 
@@ -22,6 +24,8 @@ type Runner struct {
 	machine      *Machine
 	changed      []FileInfo
 	extracted    map[string]*Extracted
+	candidates   []Candidate
+	inserted     []Candidate
 	deduped      *DedupResult
 }
 
@@ -117,7 +121,7 @@ func (r *Runner) Run() error {
 	// 4. Reading.
 	contents, err := r.readContents(r.changed)
 	if err != nil {
-		_ = r.machine.ForceFatal(err.Error())
+		r.forceFatal(err.Error())
 		return err
 	}
 	if err := r.transition(EventContentLoaded, fmt.Sprintf("loaded %d files", len(contents))); err != nil {
@@ -125,8 +129,9 @@ func (r *Runner) Run() error {
 	}
 
 	// 5. Extracting.
+	fmt.Printf("AI Mode: sending %d diary file(s) to configured LLM provider: %s\n", len(contents), r.extractor.ProviderSummary())
 	if err := r.extract(contents); err != nil {
-		_ = r.machine.ForceFatal(err.Error())
+		r.forceFatal(err.Error())
 		return err
 	}
 	if err := r.transition(EventExtractionOK, fmt.Sprintf("extracted from %d files", len(r.extracted))); err != nil {
@@ -135,25 +140,25 @@ func (r *Runner) Run() error {
 
 	// 6. Deduplicating.
 	if err := r.dedup(); err != nil {
-		_ = r.machine.ForceFatal(err.Error())
+		r.forceFatal(err.Error())
 		return err
 	}
-	if err := r.transition(EventDuplicatesResolved, fmt.Sprintf("kept %d new todos, %d new memories", len(r.deduped.NewTodos), len(r.deduped.NewMemories))); err != nil {
+	if err := r.transition(EventDuplicatesResolved, fmt.Sprintf("kept %d new candidates", len(r.candidates))); err != nil {
 		return err
 	}
 
-	// 7. Merging.
+	// 7. Candidate writing. v0.4 does not write AI output directly to final tables.
 	if err := r.merge(); err != nil {
-		_ = r.machine.ForceFatal(err.Error())
+		r.forceFatal(err.Error())
 		return err
 	}
-	if err := r.transition(EventMergeComplete, fmt.Sprintf("merged %d todos, %d memories", len(r.deduped.NewTodos), len(r.deduped.NewMemories))); err != nil {
+	if err := r.transition(EventMergeComplete, fmt.Sprintf("created %d pending candidates", len(r.inserted))); err != nil {
 		return err
 	}
 
 	// 8. Persisting.
 	if err := r.persistSnapshots(); err != nil {
-		_ = r.machine.ForceFatal(err.Error())
+		r.forceFatal(err.Error())
 		return err
 	}
 	if err := r.transition(EventPersistOK, "snapshots persisted"); err != nil {
@@ -162,11 +167,11 @@ func (r *Runner) Run() error {
 
 	// 9. Summarizing.
 	if err := r.writer.WriteAll(r.store); err != nil {
-		_ = r.machine.ForceFatal(err.Error())
+		r.forceFatal(err.Error())
 		return err
 	}
 	if err := r.htmlWriter.WriteAll(r.store); err != nil {
-		_ = r.machine.ForceFatal(err.Error())
+		r.forceFatal(err.Error())
 		return err
 	}
 	if err := r.transition(EventSummaryOK, "markdown and html summaries written"); err != nil {
@@ -188,6 +193,20 @@ func (r *Runner) transition(event Event, reason string) error {
 	}
 	last := r.machine.Log()[len(r.machine.Log())-1]
 	return r.store.AppendTransitionLog(last)
+}
+
+func (r *Runner) forceFatal(reason string) {
+	if r.machine == nil || r.store == nil {
+		return
+	}
+	if err := r.machine.ForceFatal(reason); err != nil {
+		return
+	}
+	log := r.machine.Log()
+	if len(log) == 0 {
+		return
+	}
+	_ = r.store.AppendTransitionLog(log[len(log)-1])
 }
 
 func (r *Runner) persistLog() {
@@ -237,29 +256,33 @@ func (r *Runner) extract(contents map[string]string) error {
 }
 
 func (r *Runner) dedup() error {
-	seenTodo := make(map[string]struct{})
-	seenMemory := make(map[string]struct{})
-
+	seen := make(map[string]struct{})
+	files := make(map[string]FileInfo, len(r.changed))
+	for _, f := range r.changed {
+		files[f.Path] = f
+	}
 	for path, ext := range r.extracted {
-		res, err := r.deduplicator.Dedup(ext, path, seenTodo, seenMemory)
-		if err != nil {
-			return err
+		source := files[path]
+		for _, c := range candidatesFromExtracted(ext, source) {
+			key := normalize(c.Type + " " + c.SourceHash + " " + c.Title + " " + c.Content + " " + c.EvidenceText)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			r.candidates = append(r.candidates, c)
 		}
-		r.deduped.NewTodos = append(r.deduped.NewTodos, res.NewTodos...)
-		r.deduped.NewMemories = append(r.deduped.NewMemories, res.NewMemories...)
 	}
 	return nil
 }
 
 func (r *Runner) merge() error {
-	for _, t := range r.deduped.NewTodos {
-		if err := r.store.InsertTodo(t.Text, t.SourceFile); err != nil {
+	for _, c := range r.candidates {
+		inserted, err := r.store.InsertCandidateIfNew(c)
+		if err != nil {
 			return err
 		}
-	}
-	for _, m := range r.deduped.NewMemories {
-		if err := r.store.InsertMemory(m.Topic, m.Summary, m.SourceFile); err != nil {
-			return err
+		if inserted {
+			r.inserted = append(r.inserted, c)
 		}
 	}
 	return nil
@@ -277,7 +300,11 @@ func (r *Runner) persistSnapshots() error {
 func (r *Runner) countTodos() int {
 	c := 0
 	for _, ext := range r.extracted {
-		c += len(ext.Todos)
+		for _, item := range ext.Items {
+			if item.normalizedType() == CandidateTypeTodo {
+				c++
+			}
+		}
 	}
 	return c
 }
@@ -285,17 +312,33 @@ func (r *Runner) countTodos() int {
 func (r *Runner) countMemories() int {
 	c := 0
 	for _, ext := range r.extracted {
-		c += len(ext.Memories)
+		for _, item := range ext.Items {
+			if item.normalizedType() == CandidateTypeMemory {
+				c++
+			}
+		}
 	}
 	return c
 }
 
 func (r *Runner) countNewTodos() int {
-	return len(r.deduped.NewTodos)
+	c := 0
+	for _, candidate := range r.inserted {
+		if candidate.Type == CandidateTypeTodo {
+			c++
+		}
+	}
+	return c
 }
 
 func (r *Runner) countNewMemories() int {
-	return len(r.deduped.NewMemories)
+	c := 0
+	for _, candidate := range r.inserted {
+		if candidate.Type == CandidateTypeMemory {
+			c++
+		}
+	}
+	return c
 }
 
 func (r *Runner) printReport() {
@@ -307,8 +350,8 @@ func (r *Runner) printReport() {
 	switch r.machine.State() {
 	case StateDone:
 		fmt.Printf("扫描文件:      %d\n", len(r.changed))
-		fmt.Printf("提取 Todo:     %d (去重后新增 %d)\n", r.countTodos(), r.countNewTodos())
-		fmt.Printf("提取 Memory:   %d (去重后新增 %d)\n", r.countMemories(), r.countNewMemories())
+		fmt.Printf("候选 Todo:     %d (新增 pending %d)\n", r.countTodos(), r.countNewTodos())
+		fmt.Printf("候选 Memory:   %d (新增 pending %d)\n", r.countMemories(), r.countNewMemories())
 		fmt.Printf("输出目录:      %s\n", r.writer.outDir)
 	case StateNoChanges:
 		fmt.Println("最近 3 天没有变更的日记，无需处理。")
@@ -318,6 +361,63 @@ func (r *Runner) printReport() {
 		fmt.Println("处理过程中发生不可恢复错误，请查看日志。")
 	}
 	fmt.Println()
+}
+
+func candidatesFromExtracted(ext *Extracted, source FileInfo) []Candidate {
+	var sourceDate string
+	if d, ok := storage.DateFromDiaryPath(source.Path); ok {
+		sourceDate = d.Format("2006-01-02")
+	}
+	candidates := make([]Candidate, 0, len(ext.Items))
+	for _, item := range ext.Items {
+		candidateType := item.normalizedType()
+		if candidateType == "" {
+			continue
+		}
+		title := strings.TrimSpace(item.Title)
+		content := strings.TrimSpace(item.Content)
+		if candidateType == CandidateTypeMemory {
+			if title == "" {
+				title = strings.TrimSpace(item.Topic)
+			}
+			if content == "" {
+				content = strings.TrimSpace(item.Summary)
+			}
+		}
+		if title == "" && content != "" {
+			title = content
+		}
+		if content == "" {
+			content = title
+		}
+		if content == "" {
+			continue
+		}
+		candidates = append(candidates, Candidate{
+			Type:         candidateType,
+			Title:        title,
+			Content:      content,
+			Status:       CandidateStatusPending,
+			SourceFile:   source.Path,
+			SourceDate:   sourceDate,
+			SourceHash:   source.Hash,
+			EvidenceText: strings.TrimSpace(item.EvidenceText),
+			RawAIJSON:    ext.RawJSON,
+			Confidence:   item.Confidence,
+		})
+	}
+	return candidates
+}
+
+func (item CandidateExtract) normalizedType() string {
+	switch strings.ToLower(strings.TrimSpace(item.Type)) {
+	case CandidateTypeTodo, "task", "action":
+		return CandidateTypeTodo
+	case CandidateTypeMemory, "memo", "insight", "fact":
+		return CandidateTypeMemory
+	default:
+		return ""
+	}
 }
 
 func computeBaseHash(files []FileInfo) string {

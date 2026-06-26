@@ -3,9 +3,9 @@
 [![CI](https://github.com/borankux/dear-diary/actions/workflows/ci.yml/badge.svg)](https://github.com/borankux/dear-diary/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/borankux/dear-diary.svg)](https://pkg.go.dev/github.com/borankux/dear-diary)
 
-亲爱的日记是一个 Vim-first 的 macOS 终端日记工具：输入 `diary` 直接用 Vim 写今天，输入 `diary browse` 用 TUI 月历回看，输入 `diary search <keyword>` 全文搜索 Markdown 日记。
+亲爱的日记是一个 Vim-first、本地优先的 macOS 终端日记工具：输入 `diary` 直接用 Vim 写今天，输入 `diary browse` 用 TUI 月历回看，输入 `diary search <keyword>` 全文搜索 Markdown 日记。v0.4 增加了 AI 候选提炼、人工 review、Todo 闭环和本地 dashboard。
 
-Dear Diary is a Vim-first terminal journal app for macOS. It stores plain Markdown files, opens entries in your editor, provides a Bubble Tea calendar browser, and searches journal history from the command line.
+Dear Diary is a Vim-first local journal app for macOS. It stores plain Markdown files, opens entries in your editor, provides a Bubble Tea calendar browser, searches journal history from the command line, and can turn diary entries into reviewable AI candidates for Todos and Memories.
 
 ## Why dear-diary
 
@@ -14,7 +14,8 @@ Dear Diary is a Vim-first terminal journal app for macOS. It stores plain Markdo
 - **Safe same-day append**: reopening today adds a new timestamp section instead of overwriting earlier notes.
 - **Plain Markdown storage**: readable, portable, git-friendly, and compatible with Obsidian or any text editor.
 - **Fast single binary**: Go CLI with no runtime service, database, account, or cloud dependency.
-- **Private by default**: journal data lives locally under `~/Documents/dear-diary/`.
+- **Private by default**: writing, browsing, searching, reviewing, todo management, and dashboard viewing are local. `diary process` is explicit AI Mode.
+- **Closed-loop AI processing**: LLM output becomes pending candidates first; you accept or reject before it becomes a Todo or Memory.
 
 ## Use cases
 
@@ -56,6 +57,12 @@ go install github.com/borankux/dear-diary/cmd/diary@latest
 | `diary 2026-06-24` | Open a specific date |
 | `diary 6/24` | Open month/day in the current year |
 | `diary search keyword` | Search all journal entries |
+| `diary process` | Extract pending Todo / Memory candidates with the configured LLM provider |
+| `diary review` | Accept, reject, skip, or quit pending AI candidates |
+| `diary todo` | List active todos |
+| `diary todo done <id>` | Mark a todo done |
+| `diary todo archive <id>` | Archive a todo without completing it |
+| `diary dashboard` | Open the local read-only dashboard |
 | `diary -h` | Show help |
 
 ## Daily writing model
@@ -126,21 +133,92 @@ Vim-compatible editors get cursor positioning at the append point. Other editors
     2026-06-25.md
   2026-07/
     2026-07-01.md
+  process/
+    dashboard.html
+    todos.md
+    memories.md
 ```
 
 - Default path: `~/Documents/dear-diary/YYYY-MM/YYYY-MM-DD.md`
+- Process database: `~/.local/share/dear-diary/process.db`
+- Dashboard output: `~/Documents/dear-diary/process/dashboard.html`
 - Override root path with `$DIARY_DIR`
 - Works well with iCloud Drive, Dropbox, Time Machine, git, or any file backup flow
 
 ## Search
 
-Search uses `rg` when ripgrep is installed and falls back to pure Go scanning when it is not.
+Search uses `rg` when ripgrep is installed and falls back to pure Go scanning when it is not. Only canonical diary files matching `YYYY-MM/YYYY-MM-DD.md` are searched; generated files under `process/` are excluded.
 
 ```bash
 diary search bubbletea
 ```
 
 Results are shown in a TUI list. Press `Enter` to open a matching entry, `j/k` to move, and `q` to quit.
+
+## AI processing
+
+The v0.4 closure workflow is:
+
+```bash
+diary
+diary process
+diary review
+diary todo
+diary dashboard
+```
+
+`diary process` writes AI output into `ai_candidates` as `pending`. It does not directly create final Todos or Memories. `diary review` is the human gate:
+
+- `accept`: create a final Todo or Memory
+- `reject`: keep the candidate rejected so the same source/content does not resurface
+- `skip`: leave the candidate pending
+- `quit`: stop review
+
+Provider-neutral configuration is preferred:
+
+```bash
+export DIARY_LLM_API_KEY=...
+export DIARY_LLM_BASE_URL=https://api.deepseek.com
+export DIARY_LLM_MODEL=deepseek-chat
+export DIARY_LLM_PROVIDER=openai-compatible
+```
+
+For compatibility, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `DEEPSEEK_MODEL` still work.
+
+## Dashboard
+
+`diary dashboard` regenerates and opens a local read-only HTML dashboard. It is for reading and orientation, not editing data.
+
+The dashboard prioritizes:
+
+- Today's writing status and current counts
+- A Monday-first calendar entry point, matching the TUI browsing model
+- Per-day read-only HTML pages under `process/entries/`
+- Recent diary entries with Markdown rendered for quick reading
+- A capped attention queue for pending candidates, active todos, and memories
+
+Long lists are intentionally capped so the page keeps a clear first screen as your diary history grows.
+
+## Privacy modes
+
+Local Mode commands do not upload diary content:
+
+```text
+diary
+diary browse
+diary search
+diary review
+diary todo
+diary dashboard
+```
+
+AI Mode:
+
+```text
+diary process
+```
+
+AI Mode sends changed diary file content to the configured LLM provider unless the provider points to a local endpoint.
 
 ## Development
 
@@ -163,17 +241,17 @@ cmd/diary/          CLI entrypoint
 internal/storage/   Markdown file paths, creation, append, and scanning
 internal/editor/    Editor integration
 internal/search/    ripgrep and pure Go search
+internal/process/   LLM extraction, candidates, reviewable data, dashboard
 internal/tui/       Bubble Tea calendar and search views
 docs/spec.md        Product and implementation spec
 ```
 
 ## Roadmap
 
-- `diary stats`: word count, streaks, and writing cadence
-- `diary export`: HTML or PDF export
-- Tag extraction from Markdown content
-- Optional encrypted archive support
-- Homebrew formula or release binaries
+- Stabilize the 30-day Closure Core loop
+- Add review edit / merge only after accept / reject / done / archive feels good
+- Optional local model or LLM gateway configuration
+- Later: export, tags, reminders, Homebrew formula
 
 ## FAQ
 
@@ -192,6 +270,10 @@ The code is Go and should be portable, but the current product target is macOS t
 ### Where are my private diary entries stored?
 
 Journal entries are not stored in this repository. They are written to `~/Documents/dear-diary/` by default.
+
+### Does AI processing change my diary files?
+
+No. `diary process` reads canonical diary files and writes pending candidates to SQLite. Final Todos and Memories are created only after `diary review`.
 
 ## Keywords
 

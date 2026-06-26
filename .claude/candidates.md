@@ -18,6 +18,11 @@
   - 来源：2026-06-25 Frank 把 import path 从 `dear-diary/internal/...` 改成 `github.com/borankux/dear-diary/internal/...`
   - 建议写入：仓库准备公开到 `borankux/dear-diary`，所有 import 严格用这个 path
 
+- **Closure over feature breadth**
+  - 来源：2026-06-26 Frank 明确说“我想要的是一个尽可能闭环的逻辑，不是尽可能多的，详细的功能”
+  - 建议写入：Dear Diary 迭代应优先关闭现有状态流（Candidate -> Review -> Todo/Memory -> Done/Archive），不因新资产类型或复杂 UI 扩大范围
+  - v0.4 已按该原则实现 Closure Core，questions/decisions/weekly review/local model gateway 均暂缓
+
 ## 已驳回
 （暂无）
 

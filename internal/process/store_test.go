@@ -113,3 +113,122 @@ func TestStoreInsertAndList(t *testing.T) {
 		t.Fatalf("unexpected memories: %v", memories)
 	}
 }
+
+func TestCandidateLifecycle(t *testing.T) {
+	s := newTestStore(t)
+
+	c := Candidate{
+		Type:         CandidateTypeTodo,
+		Title:        "Close the loop",
+		Content:      "Make AI output reviewable before it becomes a todo.",
+		SourceFile:   "/a/2026-06/2026-06-25.md",
+		SourceDate:   "2026-06-25",
+		SourceHash:   "hash-1",
+		EvidenceText: "AI output should not directly enter final tables.",
+		RawAIJSON:    `{"items":[]}`,
+		Confidence:   0.9,
+	}
+
+	inserted, err := s.InsertCandidateIfNew(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inserted {
+		t.Fatal("expected first candidate insert")
+	}
+	inserted, err = s.InsertCandidateIfNew(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inserted {
+		t.Fatal("duplicate candidate should not be inserted")
+	}
+
+	pending, err := s.ListPendingCandidates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending candidate, got %d", len(pending))
+	}
+	if err := s.AcceptCandidate(pending[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	pending, err = s.ListPendingCandidates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected no pending candidates, got %d", len(pending))
+	}
+	todos, err := s.ListActiveTodos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(todos) != 1 || todos[0].Text != "Close the loop" || todos[0].EvidenceText == "" {
+		t.Fatalf("unexpected accepted todo: %+v", todos)
+	}
+}
+
+func TestCandidateRejectPreventsResurface(t *testing.T) {
+	s := newTestStore(t)
+	c := Candidate{
+		Type:       CandidateTypeMemory,
+		Title:      "Provider boundary",
+		Content:    "DeepSeek is a current provider, not product identity.",
+		SourceFile: "/a/2026-06/2026-06-25.md",
+		SourceHash: "hash-2",
+	}
+	inserted, err := s.InsertCandidateIfNew(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inserted {
+		t.Fatal("expected insert")
+	}
+	pending, err := s.ListPendingCandidates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RejectCandidate(pending[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	inserted, err = s.InsertCandidateIfNew(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inserted {
+		t.Fatal("rejected duplicate should not resurface")
+	}
+}
+
+func TestTodoDoneAndArchive(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.InsertTodo("ship closure core", "/a/2026-06/2026-06-25.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertTodo("archive me", "/a/2026-06/2026-06-25.md"); err != nil {
+		t.Fatal(err)
+	}
+	todos, err := s.ListActiveTodos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(todos) != 2 {
+		t.Fatalf("expected 2 active todos, got %d", len(todos))
+	}
+	if err := s.MarkTodoDone(todos[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ArchiveTodo(todos[1].ID); err != nil {
+		t.Fatal(err)
+	}
+	todos, err = s.ListActiveTodos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(todos) != 0 {
+		t.Fatalf("expected no active todos after done/archive, got %+v", todos)
+	}
+}

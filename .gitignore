@@ -19,5 +19,12 @@ coverage.txt
 *.swo
 *~
 
-# Local diary data is intentionally NOT ignored — that lives in
-# ~/Documents/dear-diary/ which is outside this repo.
+# Local diary data and generated reading artifacts.
+# The normal location is ~/Documents/dear-diary/, outside this repo. These
+# rules prevent accidental commits if DIARY_DIR is pointed at the checkout or
+# the generated files are copied here.
+/[0-9][0-9][0-9][0-9]-[0-9][0-9]/
+/dear-diary/
+/process/
+/entries/
+/dashboard.html

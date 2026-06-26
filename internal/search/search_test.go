@@ -25,6 +25,9 @@ func setup(t *testing.T) string {
 		path := filepath.Join(monthDir, e.date+".md")
 		os.WriteFile(path, []byte(e.body), 0o644)
 	}
+	processDir := filepath.Join(dir, "process")
+	os.MkdirAll(processDir, 0o755)
+	os.WriteFile(filepath.Join(processDir, "todos.md"), []byte("Bubbletea generated output should not match\n"), 0o644)
 	return dir
 }
 

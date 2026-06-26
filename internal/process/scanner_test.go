@@ -22,7 +22,11 @@ func TestScannerAllFiles(t *testing.T) {
 	// Invalid names should be ignored.
 	invalid1 := filepath.Join(dir, "notes.md")
 	invalid2 := filepath.Join(dir, "2026-06", "random.txt")
-	for _, p := range []string{invalid1, invalid2} {
+	invalid3 := filepath.Join(dir, "process", "2026-06-25.md")
+	for _, p := range []string{invalid1, invalid2, invalid3} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}

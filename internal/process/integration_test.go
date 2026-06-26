@@ -16,8 +16,8 @@ func mustRead(t *testing.T, path string) string {
 }
 
 func TestRunnerEndToEnd(t *testing.T) {
-	if os.Getenv("DEEPSEEK_API_KEY") == "" {
-		t.Skip("DEEPSEEK_API_KEY not set")
+	if os.Getenv("DIARY_LLM_API_KEY") == "" && os.Getenv("DEEPSEEK_API_KEY") == "" {
+		t.Skip("DIARY_LLM_API_KEY not set")
 	}
 
 	dir := t.TempDir()
@@ -67,19 +67,47 @@ func TestRunnerEndToEnd(t *testing.T) {
 	t.Logf("todos.md:\n%s", mustRead(t, filepath.Join(outDir, "todos.md")))
 	t.Logf("memories.md:\n%s", mustRead(t, filepath.Join(outDir, "memories.md")))
 
-	todos, err := runner.store.ListActiveTodos()
+	candidates, err := runner.store.ListPendingCandidates()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(todos) == 0 {
-		t.Fatal("expected at least one todo extracted")
+	if len(candidates) == 0 {
+		t.Fatal("expected at least one pending candidate extracted")
 	}
+}
 
-	memories, err := runner.store.ListMemories()
-	if err != nil {
-		t.Fatal(err)
+func TestCandidatesFromExtractedPreserveSourceEvidence(t *testing.T) {
+	ext := &Extracted{
+		Items: []CandidateExtract{
+			{
+				Type:         "todo",
+				Title:        "Review candidates",
+				Content:      "Review AI candidates before accepting them.",
+				EvidenceText: "AI 不能直接进入正式库",
+				Confidence:   0.9,
+			},
+			{
+				Type:         "memory",
+				Title:        "Closure Core",
+				Content:      "v0.4 focuses on lifecycle closure.",
+				EvidenceText: "不是尽可能多的功能",
+				Confidence:   0.8,
+			},
+		},
+		RawJSON: `{"items":[]}`,
 	}
-	if len(memories) == 0 {
-		t.Fatal("expected at least one memory extracted")
+	source := FileInfo{
+		Path: "/tmp/diary/2026-06/2026-06-25.md",
+		Hash: "hash-1",
+	}
+	candidates := candidatesFromExtracted(ext, source)
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 candidates, got %d", len(candidates))
+	}
+	if candidates[0].Type != CandidateTypeTodo || candidates[0].SourceDate != "2026-06-25" || candidates[0].EvidenceText == "" {
+		t.Fatalf("bad todo candidate: %+v", candidates[0])
+	}
+	if candidates[1].Type != CandidateTypeMemory || candidates[1].SourceHash != "hash-1" || candidates[1].RawAIJSON == "" {
+		t.Fatalf("bad memory candidate: %+v", candidates[1])
 	}
 }

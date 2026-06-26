@@ -1,55 +1,50 @@
 # Session Handoff — 亲爱的日记 (dear-diary)
 
-> 最后更新：2026-06-25 v0.2.0
+> 最后更新：2026-06-26 v0.4.0 Closure Core
 
 ## 项目目标
-Vim-first macOS 终端日记应用：TUI 月历浏览 + 同一天追加时间戳 + 全文搜索。
+Vim-first、本地优先的 Markdown 日记 + AI 提炼闭环：原始日记保持纯文本 source of truth，LLM 输出先进入 AI candidates，人工 review 后才进入 Todo / Memory，并能通过 Todo done/archive 关闭行动项。
+
+## 当前状态
+- v0.4.0 Closure Core 已实现并通过验证。
+- `diary process` 现在写入 pending `ai_candidates`，不再直接写 final todos/memories。
+- `diary review` 支持 accept / reject / skip / quit。
+- `diary todo` 支持 list / done / archive。
+- `diary dashboard` 是只读阅读视图：显示今日概览、Web 月历入口、单日日记页、最近日记、注意力队列和长期记忆，列表限量展示。
+- Search / process / dashboard 都使用 canonical diary-file filter：只认 `YYYY-MM/YYYY-MM-DD.md`。
+- LLM 配置已 provider-neutral：优先 `DIARY_LLM_*`，兼容 `DEEPSEEK_*`。
 
 ## 核心产出文件
 | 文件 | 状态 | 版本 | 说明 |
 |------|------|------|------|
-| cmd/diary/main.go | ✅ | v0.2.0 | CLI 入口 + 子命令分发 + 回顾打印 |
-| internal/storage/ | ✅ | v0.1.0 | 路径/创建/追加/扫描 |
-| internal/editor/ | ✅ | v0.1.0 | $EDITOR 调用 + Vim 光标定位 |
-| internal/search/ | ✅ | v0.1.0 | rg/Go fallback + 日期倒序 |
-| internal/tui/ | ✅ | v0.2.0 | 月历（含 streak）+ 搜索结果 |
-| internal/stats/ | ✅ | v0.2.0 | streak 计算 |
-| internal/memory/ | ✅ | v0.2.0 | X 年前的今天 |
-| docs/spec.md | ✅ | v0.1.0 | 产品和实现 spec |
-| ~/bin/diary | ✅ | v0.2.0 | 已全局部署 |
+| cmd/diary/main.go | ✅ | v0.4.0 | CLI + process/review/todo/dashboard |
+| internal/storage/ | ✅ | v0.4.0 | canonical diary-file filter |
+| internal/search/ | ✅ | v0.4.0 | diary-only search |
+| internal/process/store.go | ✅ | v0.4.0 | additive schema migration + candidates + todo lifecycle |
+| internal/process/runner.go | ✅ | v0.4.0 | process writes pending candidates |
+| internal/process/extractor.go | ✅ | v0.4.0 | provider-neutral OpenAI-compatible extraction |
+| internal/process/html.go | ✅ | v0.4.0 | read-only dashboard + generated per-day diary pages, no AI call |
+| README.md | ✅ | v0.4.0 | Local Mode / AI Mode / workflow documented |
+| docs/prd/main.md | ✅ | v0.4.0 | Closure Core PRD/status |
 
-## 当前进度
-- v0.2.0 已发布（基础 MVP + streak + 回顾提醒）
-- 项目管理系统初始化完成
-- 测试覆盖：storage / search / stats / memory 4 个包 22+ 用例全过
-- 全局命令已部署到 `~/bin/diary`（在 PATH 里）
-- 用户已开始实际使用（2026-06-24 补写昨天，2026-06-25 写今天）
+## Verification
+- ✅ `go test ./...`
+- ✅ `go vet ./...`
+- ✅ `make build`
+- ✅ `./bin/diary --version` → `0.4.0`
 
 ## 关键设计决策
-| # | 决策 | 理由 | 日期 |
-|---|------|------|------|
-| 1 | Go + Bubbletea + Lipgloss | 单二进制、启动快、TUI 成熟 | 2026-06-25 |
-| 2 | 文件名是唯一真相，不解析内容推断日期 | 避免 markdown 解析脆弱性 | 2026-06-25 |
-| 3 | 路径 `~/Documents/dear-diary/YYYY-MM/YYYY-MM-DD.md` | iCloud 自动同步、按月分组直观 | 2026-06-25 |
-| 4 | 不加密、不云同步、不数据库 | YAGNI；让 macOS FileVault + iCloud ADP 处理 | 2026-06-25 |
-| 5 | 5 分钟内不重复追加时间戳段落 | 防误触产生空段落 | 2026-06-25 |
-| 6 | streak 温和口径（今天没写从昨天算） | 不打 "0 天" 打击信心，养成习惯友好 | 2026-06-25 |
-| 7 | 周一作为月历开头 | 中国习惯 | 2026-06-25 |
-| 8 | 不引入 cobra 等 CLI 框架 | YAGNI；标准库 flag + 手写 dispatch 足够 | 2026-06-25 |
-| 9 | 采用 6 组件项目管理系统 | Log + Wiki + Structure + Constitution + TODO + Docs | 2026-06-25 |
-| 10 | 项目语言：bilingual | 开源准备，README 已双语 | 2026-06-25 |
-
-## 迭代历史
-| 版本 | 日期 | 变更 |
-|------|------|------|
-| v0.1.0 | 2026-06-25 | 基础 MVP — diary/browse/search/yesterday + TUI 月历 + 同日追加 |
-| v0.2.0 | 2026-06-25 | streak 连续天数 + X 年前的今天回顾 |
+| # | 决策 | 理由 |
+|---|------|------|
+| 1 | v0.4 只做 Closure Core，不加 questions/decisions/weekly review | 避免继续堆未闭环功能 |
+| 2 | AI output 先写 `ai_candidates` | 防止 AI 误判污染长期 Todo/Memory |
+| 3 | rejected candidate 也参与去重 | 防止同一来源/内容反复 resurfacing |
+| 4 | 保留 v0.3 todos/memories 表并 additive migrate | 保护现有数据 |
+| 5 | DeepSeek 只是兼容配置，产品边界是 OpenAI-compatible LLM provider | 未来可切本地模型/gateway |
+| 6 | dashboard 不调用 AI、不写数据 | dashboard 是阅读和判断重点的页面，不是交互工作台 |
 
 ## 下一步
-- [ ] 第二档功能：天气自动填表（wttr.in）+ 心情 emoji
-- [ ] 第二档功能：每日提醒（`diary remind 22:00` → launchd + terminal-notifier）
-- [ ] 第三档功能：标签系统（`#tag` 解析 + `diary search --tag`）
-- [ ] 第三档功能：导出 HTML/PDF（`diary export 2026-06`）
-- [ ] 长期：加密（age）+ Homebrew formula
-- [ ] 完善 docs/prd/main.md（产品需求文档）
-- [ ] 完善 docs/tech-design/main.md（技术设计总览）
+1. 用真实日记跑一轮 `diary process`，确认新 candidates 质量。
+2. 用 `diary review` 接受/拒绝几条，观察 review 是否太慢。
+3. 用 `diary todo` 关闭 active todos，观察 done/archive 是否足够。
+4. 如果人工 review 卡住，再做 `review edit`；如果 memory 重复明显，再做轻量 merge。

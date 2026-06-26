@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -19,7 +21,7 @@ import (
 	"github.com/borankux/dear-diary/internal/tui"
 )
 
-const version = "0.3.0"
+const version = "0.4.0"
 
 const usage = `亲爱的日记 — 一个 TUI 日记应用
 
@@ -33,14 +35,22 @@ const usage = `亲爱的日记 — 一个 TUI 日记应用
                             06-24         月-日 (默认今年)
                             6/24          月/日 (默认今年)
   diary search <keyword> 搜索所有日记内容 (匹配的行倒序列出)
-  diary process          用 AI 提炼最近日记为 Todo / Memory
-  diary dashboard        在浏览器打开提炼结果看板
+  diary process          用配置的 LLM 提炼最近日记为待确认候选项
+  diary review           人工确认 / 拒绝 AI 候选项
+  diary todo             查看 active todos
+  diary todo done <id>   标记 todo 完成
+  diary todo archive <id> 归档 todo
+  diary dashboard        在浏览器打开本地看板
   diary -h | --help      显示本帮助
   diary -v | --version   显示版本号
 
 存储:
   ~/Documents/dear-diary/YYYY-MM/YYYY-MM-DD.md
   例: ~/Documents/dear-diary/2026-06/2026-06-25.md
+
+隐私:
+  diary / browse / search / dashboard / todo / review 只读取本地文件和 SQLite
+  diary process 会把待处理日记内容发送给配置的 LLM Provider
 
 编辑器:
   优先级 $DIARY_EDITOR > $EDITOR > vim
@@ -79,6 +89,12 @@ func main() {
 		return
 	case "process":
 		must(runProcess())
+		return
+	case "review":
+		must(runReview())
+		return
+	case "todo":
+		must(runTodo(args[1:]))
 		return
 	case "dashboard":
 		must(process.RegenerateAndOpenDashboard())
@@ -164,6 +180,113 @@ func runProcess() error {
 	}
 	defer runner.Close()
 	return runner.Run()
+}
+
+func runReview() error {
+	store, err := process.NewStore("")
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	candidates, err := store.ListPendingCandidates()
+	if err != nil {
+		return err
+	}
+	if len(candidates) == 0 {
+		fmt.Println("没有待确认的 AI 候选项。")
+		return nil
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	for i, c := range candidates {
+		fmt.Printf("\n[%d/%d] #%d %s\n", i+1, len(candidates), c.ID, c.Type)
+		if c.Title != "" {
+			fmt.Println("Title:", c.Title)
+		}
+		fmt.Println("Content:", c.Content)
+		if c.EvidenceText != "" {
+			fmt.Println("Evidence:", c.EvidenceText)
+		}
+		if c.SourceDate != "" {
+			fmt.Println("Source:", c.SourceDate)
+		} else {
+			fmt.Println("Source:", c.SourceFile)
+		}
+		fmt.Print("Action [a=accept, r=reject, s=skip, q=quit]: ")
+		line, err := reader.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return err
+		}
+		action := strings.TrimSpace(strings.ToLower(line))
+		switch action {
+		case "a", "accept":
+			if err := store.AcceptCandidate(c.ID); err != nil {
+				return err
+			}
+			fmt.Println("Accepted.")
+		case "r", "reject":
+			if err := store.RejectCandidate(c.ID); err != nil {
+				return err
+			}
+			fmt.Println("Rejected.")
+		case "s", "skip", "":
+			fmt.Println("Skipped.")
+		case "q", "quit":
+			return nil
+		default:
+			fmt.Println("Unknown action, skipped.")
+		}
+	}
+	return nil
+}
+
+func runTodo(args []string) error {
+	store, err := process.NewStore("")
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	if len(args) == 0 || args[0] == "list" {
+		todos, err := store.ListActiveTodos()
+		if err != nil {
+			return err
+		}
+		if len(todos) == 0 {
+			fmt.Println("没有 active todos。")
+			return nil
+		}
+		for _, t := range todos {
+			fmt.Printf("#%d %s\n", t.ID, t.Text)
+			if t.SourceDate != "" {
+				fmt.Printf("   source: %s\n", t.SourceDate)
+			}
+		}
+		return nil
+	}
+	if len(args) != 2 {
+		return errors.New("用法: diary todo [list] | diary todo done <id> | diary todo archive <id>")
+	}
+	id, err := strconv.Atoi(args[1])
+	if err != nil {
+		return fmt.Errorf("invalid todo id %q", args[1])
+	}
+	switch args[0] {
+	case "done":
+		if err := store.MarkTodoDone(id); err != nil {
+			return err
+		}
+		fmt.Printf("Todo #%d done.\n", id)
+	case "archive":
+		if err := store.ArchiveTodo(id); err != nil {
+			return err
+		}
+		fmt.Printf("Todo #%d archived.\n", id)
+	default:
+		return errors.New("用法: diary todo [list] | diary todo done <id> | diary todo archive <id>")
+	}
+	return nil
 }
 
 // mustOpen 打开指定日期的 Vim。

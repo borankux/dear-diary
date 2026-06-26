@@ -8,10 +8,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
-// Default values for DeepSeek API.
+// Default values for the currently used OpenAI-compatible API.
 const (
 	defaultBaseURL = "https://api.deepseek.com"
 	defaultModel   = "deepseek-chat"
@@ -19,8 +20,10 @@ const (
 
 // Extracted is the structured output from AI for one diary file.
 type Extracted struct {
-	Todos    []string `json:"todos"`
-	Memories []MemoryExtract `json:"memories"`
+	Items    []CandidateExtract `json:"items"`
+	Todos    []string           `json:"todos"`
+	Memories []MemoryExtract    `json:"memories"`
+	RawJSON  string             `json:"-"`
 }
 
 // MemoryExtract is a memory candidate before persistence.
@@ -29,38 +32,70 @@ type MemoryExtract struct {
 	Summary string `json:"summary"`
 }
 
-// Extractor calls the DeepSeek API to extract todos and memories.
+// CandidateExtract is a provider-neutral candidate item returned by the LLM.
+type CandidateExtract struct {
+	Type         string  `json:"type"`
+	Title        string  `json:"title"`
+	Content      string  `json:"content"`
+	Topic        string  `json:"topic"`
+	Summary      string  `json:"summary"`
+	EvidenceText string  `json:"evidence_text"`
+	Confidence   float64 `json:"confidence"`
+}
+
+// Extractor calls an OpenAI-compatible LLM API to extract candidates.
 type Extractor struct {
-	baseURL string
-	model   string
-	apiKey  string
-	client  *http.Client
+	provider string
+	baseURL  string
+	model    string
+	apiKey   string
+	client   *http.Client
 }
 
 // NewExtractor creates an extractor reading configuration from environment.
-// Env vars: DEEPSEEK_API_KEY (required), DEEPSEEK_BASE_URL (optional), DEEPSEEK_MODEL (optional).
+// Preferred env vars: DIARY_LLM_API_KEY, DIARY_LLM_BASE_URL, DIARY_LLM_MODEL.
+// DEEPSEEK_* remains supported for compatibility with existing local setup.
 func NewExtractor() (*Extractor, error) {
-	key := os.Getenv("DEEPSEEK_API_KEY")
+	key := firstEnv("DIARY_LLM_API_KEY", "DEEPSEEK_API_KEY")
 	if key == "" {
-		return nil, errors.New("DEEPSEEK_API_KEY not set")
+		return nil, errors.New("DIARY_LLM_API_KEY not set")
 	}
-	baseURL := os.Getenv("DEEPSEEK_BASE_URL")
+	baseURL := firstEnv("DIARY_LLM_BASE_URL", "DEEPSEEK_BASE_URL")
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
-	model := os.Getenv("DEEPSEEK_MODEL")
+	model := firstEnv("DIARY_LLM_MODEL", "DEEPSEEK_MODEL")
 	if model == "" {
 		model = defaultModel
 	}
+	provider := os.Getenv("DIARY_LLM_PROVIDER")
+	if provider == "" {
+		provider = "openai-compatible"
+	}
 	return &Extractor{
-		baseURL: baseURL,
-		model:   model,
-		apiKey:  key,
-		client:  &http.Client{Timeout: 120 * time.Second},
+		provider: provider,
+		baseURL:  baseURL,
+		model:    model,
+		apiKey:   key,
+		client:   &http.Client{Timeout: 120 * time.Second},
 	}, nil
 }
 
-// Extract sends one diary file's content to DeepSeek and parses the response.
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// ProviderSummary returns a non-secret description of where diary content will be sent.
+func (e *Extractor) ProviderSummary() string {
+	return fmt.Sprintf("%s %s via %s", e.provider, e.model, e.baseURL)
+}
+
+// Extract sends one diary file's content to the configured LLM and parses the response.
 func (e *Extractor) Extract(content string) (*Extracted, error) {
 	payload := map[string]any{
 		"model":       e.model,
@@ -95,7 +130,7 @@ func (e *Extractor) Extract(content string) (*Extracted, error) {
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("deepseek API error %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("llm API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var apiResp struct {
@@ -115,28 +150,69 @@ func (e *Extractor) Extract(content string) (*Extracted, error) {
 		return nil, errors.New(apiResp.Error.Message)
 	}
 	if len(apiResp.Choices) == 0 {
-		return nil, errors.New("empty choices from deepseek")
+		return nil, errors.New("empty choices from llm provider")
 	}
 
 	var extracted Extracted
 	if err := json.Unmarshal([]byte(apiResp.Choices[0].Message.Content), &extracted); err != nil {
 		return nil, fmt.Errorf("parse extracted json: %w\nraw: %s", err, apiResp.Choices[0].Message.Content)
 	}
+	extracted.RawJSON = apiResp.Choices[0].Message.Content
+	extracted.Normalize()
 	return &extracted, nil
 }
 
-const systemPrompt = `你是一个日记提炼助手。请阅读用户的日记内容，提取两类结构化资产：
+// Normalize converts both the v0.4 items format and legacy v0.3 todos/memories
+// format into one candidate list.
+func (e *Extracted) Normalize() {
+	for _, todo := range e.Todos {
+		if strings.TrimSpace(todo) == "" {
+			continue
+		}
+		e.Items = append(e.Items, CandidateExtract{
+			Type:    CandidateTypeTodo,
+			Title:   todo,
+			Content: todo,
+		})
+	}
+	for _, memory := range e.Memories {
+		if strings.TrimSpace(memory.Topic) == "" && strings.TrimSpace(memory.Summary) == "" {
+			continue
+		}
+		e.Items = append(e.Items, CandidateExtract{
+			Type:    CandidateTypeMemory,
+			Title:   memory.Topic,
+			Content: memory.Summary,
+		})
+	}
+}
 
-1. Todos：用户提到要做、已经完成、或者状态发生变化的事情。每条用简洁的一句话描述。
-2. Memories：重要的知识、发现、经验、关系型记忆。每条包含 topic（主题）和 summary（摘要）。
+const systemPrompt = `你是一个日记提炼助手。请阅读用户的日记内容，提取结构化候选项。
+
+只提取两类：
+1. todo：用户需要行动、跟进、完成或归档的事情。
+2. memory：未来值得复用的长期记忆、偏好、经验、项目上下文或关系型信息。
+
+不要输出 question、decision、weekly review、graph 或其它类型。
 
 只输出严格的 JSON，格式如下，不要任何解释：
 {
-  "todos": ["...", "..."],
-  "memories": [
-    {"topic": "...", "summary": "..."},
-    {"topic": "...", "summary": "..."}
+  "items": [
+    {
+      "type": "todo",
+      "title": "...",
+      "content": "...",
+      "evidence_text": "原文中支持该提取的短句",
+      "confidence": 0.9
+    },
+    {
+      "type": "memory",
+      "title": "主题",
+      "content": "摘要",
+      "evidence_text": "原文中支持该记忆的短句",
+      "confidence": 0.8
+    }
   ]
 }
 
-如果某类为空，返回空数组。`
+如果没有有价值候选，返回 {"items": []}。`

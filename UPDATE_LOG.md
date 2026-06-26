@@ -4,6 +4,33 @@
 
 <!-- version-style: semantic -->
 
+## v0.4.0 (2026-06-26)
+
+### Minor: Closure Core
+
+- 新增 AI candidate layer：LLM 输出先进入 pending `ai_candidates`
+- `diary process` 不再直接写 final todos/memories
+- 新增 `diary review`：accept / reject / skip / quit
+- 新增 `diary todo`：list / done / archive
+- Todo / Memory final records 支持 source evidence 相关字段（additive migration）
+- LLM provider 配置改为 `DIARY_LLM_*` 优先，兼容 `DEEPSEEK_*`
+- 明确 Local Mode / AI Mode 隐私边界
+- Search / process / dashboard 共用 canonical diary-file 规则，排除 `process/` 生成 Markdown
+- Dashboard 改为只读阅读视图：今日概览、Web 月历入口、单日日记页、最近日记、注意力队列、长期记忆
+- Fatal state transition 写入持久 transition log
+- 验证：`go test ./...`、`go vet ./...`、`make build`、`./bin/diary --version`
+
+## v0.3.0 (2026-06-26)
+
+### Minor: AI processing POC + dashboard
+
+- 新增 `diary process`，基于 LLM 提炼日记中的 Todo / Memory
+- 新增 SQLite `process.db`：processing runs、file snapshots、todos、memories
+- 新增 process state machine 和 transition logs
+- 新增 Markdown summaries：`process/todos.md`、`process/memories.md`
+- 新增 `diary dashboard`，生成本地 HTML dashboard
+- 引入 `internal/process` 包和对应测试
+
 ## v0.2.0 (2026-06-25)
 
 ### Minor: streak + 回顾提醒

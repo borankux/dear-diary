@@ -148,3 +148,21 @@ func TestAllMarkdownFilesSortedByPath(t *testing.T) {
 		t.Errorf("files[0] = %s, want %s", files[0], want0)
 	}
 }
+
+func TestDiaryFilePathFilter(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{filepath.Join("2026-06", "2026-06-25.md"), true},
+		{filepath.Join("2026-06", "2026-06-25.txt"), false},
+		{filepath.Join("2026-06", "notes.md"), false},
+		{filepath.Join("process", "todos.md"), false},
+		{filepath.Join("2026-05", "2026-06-25.md"), false},
+	}
+	for _, tc := range cases {
+		if got := IsDiaryFilePath(tc.path); got != tc.want {
+			t.Fatalf("IsDiaryFilePath(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}

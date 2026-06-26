@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/borankux/dear-diary/internal/storage"
 )
 
 // Result 表示一条搜索匹配。
@@ -62,6 +64,9 @@ func parseRgOutput(s string) []Result {
 			continue
 		}
 		path := line[:idx1]
+		if !storage.IsDiaryFilePath(path) {
+			continue
+		}
 		rest := line[idx1+1:]
 		idx2 := strings.Index(rest, ":")
 		if idx2 < 0 {
@@ -88,7 +93,7 @@ func searchWithGo(root, keyword string) ([]Result, error) {
 	var results []Result
 	kw := strings.ToLower(keyword)
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
+		if err != nil || info.IsDir() || !storage.IsDiaryFilePath(path) {
 			return nil
 		}
 		f, err := os.Open(path)

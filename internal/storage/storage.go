@@ -117,13 +117,38 @@ func (s *Storage) AllMarkdownFiles() ([]string, error) {
 		if err != nil {
 			return nil
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".md") {
+		if info.IsDir() || !IsDiaryFilePath(path) {
 			return nil
 		}
 		files = append(files, path)
 		return nil
 	})
 	return files, err
+}
+
+// IsDiaryFilePath reports whether path matches the canonical diary layout:
+// YYYY-MM/YYYY-MM-DD.md. Generated files such as process/todos.md are not
+// diary source files even though they are Markdown.
+func IsDiaryFilePath(path string) bool {
+	name := filepath.Base(path)
+	if filepath.Ext(name) != ".md" || len(name) != len("YYYY-MM-DD.md") {
+		return false
+	}
+	datePart := strings.TrimSuffix(name, ".md")
+	d, err := time.Parse("2006-01-02", datePart)
+	if err != nil {
+		return false
+	}
+	return filepath.Base(filepath.Dir(path)) == d.Format("2006-01")
+}
+
+// DateFromDiaryPath extracts the date encoded in a canonical diary path.
+func DateFromDiaryPath(path string) (time.Time, bool) {
+	if !IsDiaryFilePath(path) {
+		return time.Time{}, false
+	}
+	d, err := time.Parse("2006-01-02", strings.TrimSuffix(filepath.Base(path), ".md"))
+	return d, err == nil
 }
 
 // BuildInitialContent 生成新日记的初始内容。
