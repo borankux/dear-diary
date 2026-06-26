@@ -12,6 +12,7 @@ import (
 
 	"github.com/borankux/dear-diary/internal/editor"
 	"github.com/borankux/dear-diary/internal/memory"
+	"github.com/borankux/dear-diary/internal/process"
 	"github.com/borankux/dear-diary/internal/search"
 	"github.com/borankux/dear-diary/internal/stats"
 	"github.com/borankux/dear-diary/internal/storage"
@@ -32,6 +33,7 @@ const usage = `亲爱的日记 — 一个 TUI 日记应用
                             06-24         月-日 (默认今年)
                             6/24          月/日 (默认今年)
   diary search <keyword> 搜索所有日记内容 (匹配的行倒序列出)
+  diary process          用 AI 提炼最近日记为 Todo / Memory
   diary -h | --help      显示本帮助
   diary -v | --version   显示版本号
 
@@ -73,6 +75,9 @@ func main() {
 			die(2, "缺少搜索关键词", "用法: diary search <关键词>")
 		}
 		must(runSearch(strings.Join(args[1:], " ")))
+		return
+	case "process":
+		must(runProcess())
 		return
 	}
 
@@ -145,6 +150,16 @@ func runSearch(keyword string) error {
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
 	return err
+}
+
+func runProcess() error {
+	s := storage.New()
+	runner, err := process.NewRunner(s.RootDir(), process.ProcessOutDir())
+	if err != nil {
+		return err
+	}
+	defer runner.Close()
+	return runner.Run()
 }
 
 // mustOpen 打开指定日期的 Vim。
