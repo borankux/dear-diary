@@ -19,7 +19,7 @@ import (
 	"github.com/borankux/dear-diary/internal/tui"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 const usage = `亲爱的日记 — 一个 TUI 日记应用
 
