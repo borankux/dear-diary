@@ -34,6 +34,7 @@ const usage = `亲爱的日记 — 一个 TUI 日记应用
                             6/24          月/日 (默认今年)
   diary search <keyword> 搜索所有日记内容 (匹配的行倒序列出)
   diary process          用 AI 提炼最近日记为 Todo / Memory
+  diary dashboard        在浏览器打开提炼结果看板
   diary -h | --help      显示本帮助
   diary -v | --version   显示版本号
 
@@ -78,6 +79,9 @@ func main() {
 		return
 	case "process":
 		must(runProcess())
+		return
+	case "dashboard":
+		must(process.RegenerateAndOpenDashboard())
 		return
 	}
 

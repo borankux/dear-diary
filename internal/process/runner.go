@@ -16,6 +16,7 @@ type Runner struct {
 	extractor    *Extractor
 	deduplicator *Deduplicator
 	writer       *SummaryWriter
+	htmlWriter   *HTMLWriter
 	runID        string
 	baseHash     string
 	machine      *Machine
@@ -47,6 +48,7 @@ func NewRunnerWithStore(rootDir, outDir, storePath string) (*Runner, error) {
 		extractor:    extractor,
 		deduplicator: NewDeduplicator(store),
 		writer:       NewSummaryWriter(outDir),
+		htmlWriter:   NewHTMLWriter(outDir),
 		extracted:    make(map[string]*Extracted),
 		deduped:      &DedupResult{},
 	}, nil
@@ -163,7 +165,11 @@ func (r *Runner) Run() error {
 		_ = r.machine.ForceFatal(err.Error())
 		return err
 	}
-	if err := r.transition(EventSummaryOK, "markdown summaries written"); err != nil {
+	if err := r.htmlWriter.WriteAll(r.store); err != nil {
+		_ = r.machine.ForceFatal(err.Error())
+		return err
+	}
+	if err := r.transition(EventSummaryOK, "markdown and html summaries written"); err != nil {
 		return err
 	}
 
