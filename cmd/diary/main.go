@@ -40,6 +40,10 @@ const usage = `亲爱的日记 — 一个 TUI 日记应用
   diary todo             查看 active todos
   diary todo done <id>   标记 todo 完成
   diary todo archive <id> 归档 todo
+  diary todo status <id> <status>
+                         设置生命周期状态: active, in_progress, done, wont_do, archived, other
+  diary todo priority <id> <0-100|clear>
+                         设置或清除优先级，数字越大越靠前
   diary dashboard        在浏览器打开本地看板
   diary -h | --help      显示本帮助
   diary -v | --version   显示版本号
@@ -189,10 +193,15 @@ func runReview() error {
 	}
 	defer store.Close()
 
+	counts, err := store.CandidateStatusCounts()
+	if err != nil {
+		return err
+	}
 	candidates, err := store.ListPendingCandidates()
 	if err != nil {
 		return err
 	}
+	fmt.Printf("AI candidates: %d pending · %d accepted · %d rejected\n", counts.Pending, counts.Accepted, counts.Rejected)
 	if len(candidates) == 0 {
 		fmt.Println("没有待确认的 AI 候选项。")
 		return nil
@@ -258,15 +267,19 @@ func runTodo(args []string) error {
 			return nil
 		}
 		for _, t := range todos {
-			fmt.Printf("#%d %s\n", t.ID, t.Text)
+			priority := ""
+			if t.HasPriority {
+				priority = fmt.Sprintf(" P%d", t.Priority)
+			}
+			fmt.Printf("#%d%s %s\n", t.ID, priority, t.Text)
 			if t.SourceDate != "" {
 				fmt.Printf("   source: %s\n", t.SourceDate)
 			}
 		}
 		return nil
 	}
-	if len(args) != 2 {
-		return errors.New("用法: diary todo [list] | diary todo done <id> | diary todo archive <id>")
+	if len(args) < 2 {
+		return errors.New(todoUsage())
 	}
 	id, err := strconv.Atoi(args[1])
 	if err != nil {
@@ -274,19 +287,56 @@ func runTodo(args []string) error {
 	}
 	switch args[0] {
 	case "done":
+		if len(args) != 2 {
+			return errors.New(todoUsage())
+		}
 		if err := store.MarkTodoDone(id); err != nil {
 			return err
 		}
 		fmt.Printf("Todo #%d done.\n", id)
 	case "archive":
+		if len(args) != 2 {
+			return errors.New(todoUsage())
+		}
 		if err := store.ArchiveTodo(id); err != nil {
 			return err
 		}
 		fmt.Printf("Todo #%d archived.\n", id)
+	case "status":
+		if len(args) != 3 {
+			return errors.New(todoUsage())
+		}
+		if err := store.SetTodoStatus(id, args[2]); err != nil {
+			return err
+		}
+		fmt.Printf("Todo #%d status -> %s.\n", id, args[2])
+	case "priority":
+		if len(args) != 3 {
+			return errors.New(todoUsage())
+		}
+		if strings.EqualFold(args[2], "clear") || args[2] == "-" {
+			if err := store.SetTodoPriority(id, nil); err != nil {
+				return err
+			}
+			fmt.Printf("Todo #%d priority cleared.\n", id)
+			return nil
+		}
+		priority, err := strconv.Atoi(args[2])
+		if err != nil {
+			return fmt.Errorf("invalid priority %q", args[2])
+		}
+		if err := store.SetTodoPriority(id, &priority); err != nil {
+			return err
+		}
+		fmt.Printf("Todo #%d priority -> %d.\n", id, priority)
 	default:
-		return errors.New("用法: diary todo [list] | diary todo done <id> | diary todo archive <id>")
+		return errors.New(todoUsage())
 	}
 	return nil
+}
+
+func todoUsage() string {
+	return "用法: diary todo [list] | diary todo done <id> | diary todo archive <id> | diary todo status <id> <status> | diary todo priority <id> <0-100|clear>"
 }
 
 // mustOpen 打开指定日期的 Vim。

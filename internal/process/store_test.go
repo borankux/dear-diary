@@ -114,6 +114,62 @@ func TestStoreInsertAndList(t *testing.T) {
 	}
 }
 
+func TestTodoPrioritySortingAndStatusLifecycle(t *testing.T) {
+	s := newTestStore(t)
+
+	if err := s.InsertTodo("low priority", "/a/2026-06/2026-06-25.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertTodo("high priority", "/a/2026-06/2026-06-25.md"); err != nil {
+		t.Fatal(err)
+	}
+	todos, err := s.ListActiveTodos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make(map[string]int)
+	for _, todo := range todos {
+		ids[todo.Text] = todo.ID
+	}
+	low := 20
+	high := 90
+	if err := s.SetTodoPriority(ids["low priority"], &low); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetTodoPriority(ids["high priority"], &high); err != nil {
+		t.Fatal(err)
+	}
+
+	todos, err = s.ListActiveTodos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(todos) != 2 || todos[0].Text != "high priority" || !todos[0].HasPriority || todos[0].Priority != 90 {
+		t.Fatalf("expected high priority todo first, got %+v", todos)
+	}
+	if err := s.SetTodoStatus(todos[0].ID, TodoStatusInProgress); err != nil {
+		t.Fatal(err)
+	}
+	active, err := s.ListActiveTodos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inProgress, err := s.ListTodosByStatus(TodoStatusInProgress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 || len(inProgress) != 1 || inProgress[0].Text != "high priority" {
+		t.Fatalf("unexpected lifecycle lists: active=%+v inProgress=%+v", active, inProgress)
+	}
+	counts, err := s.TodoStatusCounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.Active != 1 || counts.InProgress != 1 {
+		t.Fatalf("unexpected lifecycle counts: %+v", counts)
+	}
+}
+
 func TestCandidateLifecycle(t *testing.T) {
 	s := newTestStore(t)
 
@@ -169,6 +225,13 @@ func TestCandidateLifecycle(t *testing.T) {
 	if len(todos) != 1 || todos[0].Text != "Close the loop" || todos[0].EvidenceText == "" {
 		t.Fatalf("unexpected accepted todo: %+v", todos)
 	}
+	counts, err := s.CandidateStatusCounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.Pending != 0 || counts.Accepted != 1 || counts.Rejected != 0 {
+		t.Fatalf("unexpected candidate counts: %+v", counts)
+	}
 }
 
 func TestCandidateRejectPreventsResurface(t *testing.T) {
@@ -203,6 +266,51 @@ func TestCandidateRejectPreventsResurface(t *testing.T) {
 	}
 }
 
+func TestCandidateDedupIgnoresChangedSourceHashForSameDate(t *testing.T) {
+	s := newTestStore(t)
+	c := Candidate{
+		Type:       CandidateTypeTodo,
+		Title:      "Write dashboard review",
+		Content:    "Review the dashboard after diary processing.",
+		SourceFile: "/a/2026-06/2026-06-26.md",
+		SourceDate: "2026-06-26",
+		SourceHash: "hash-before-edit",
+	}
+	inserted, err := s.InsertCandidateIfNew(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inserted {
+		t.Fatal("expected first insert")
+	}
+	pending, err := s.ListPendingCandidates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AcceptCandidate(pending[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	c.SourceHash = "hash-after-edit"
+	inserted, err = s.InsertCandidateIfNew(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inserted {
+		t.Fatal("same-date duplicate should not reappear just because source hash changed")
+	}
+
+	c.SourceDate = "2026-06-27"
+	c.SourceFile = "/a/2026-06/2026-06-27.md"
+	inserted, err = s.InsertCandidateIfNew(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inserted {
+		t.Fatal("same content on a different diary date should be allowed")
+	}
+}
+
 func TestTodoDoneAndArchive(t *testing.T) {
 	s := newTestStore(t)
 	if err := s.InsertTodo("ship closure core", "/a/2026-06/2026-06-25.md"); err != nil {
@@ -230,5 +338,23 @@ func TestTodoDoneAndArchive(t *testing.T) {
 	}
 	if len(todos) != 0 {
 		t.Fatalf("expected no active todos after done/archive, got %+v", todos)
+	}
+	done, err := s.ListTodosByStatus("done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived, err := s.ListTodosByStatus("archived")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(done) != 1 || len(archived) != 1 {
+		t.Fatalf("expected one done and one archived todo, got done=%+v archived=%+v", done, archived)
+	}
+	counts, err := s.TodoStatusCounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.Active != 0 || counts.Done != 1 || counts.Archived != 1 {
+		t.Fatalf("unexpected todo counts: %+v", counts)
 	}
 }

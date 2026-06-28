@@ -134,6 +134,7 @@ func (s *Store) ensureSchemaCompatibility() error {
 			"evidence_text TEXT",
 			"created_from_candidate_id INTEGER",
 			"completed_at DATETIME",
+			"priority INTEGER",
 		},
 		"memories": {
 			"status TEXT NOT NULL DEFAULT 'active'",
@@ -153,6 +154,7 @@ func (s *Store) ensureSchemaCompatibility() error {
 	}
 	_, err := s.db.Exec(`
 CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
+CREATE INDEX IF NOT EXISTS idx_todos_status_priority ON todos(status, priority DESC, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
 `)
 	return err
@@ -303,28 +305,52 @@ func nullableCandidateID(id int) any {
 
 // ListActiveTodos returns active todos.
 func (s *Store) ListActiveTodos() ([]Todo, error) {
+	return s.ListTodosByStatus(TodoStatusActive)
+}
+
+// ListTodosByStatus returns todos in one lifecycle state for dashboard review.
+func (s *Store) ListTodosByStatus(status string) ([]Todo, error) {
+	status, err := normalizeTodoStatus(status)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.Query(
-		`SELECT id, text, status, source_file, source_date, source_hash, evidence_text, created_at, updated_at
+		`SELECT id, text, status, source_file, source_date, source_hash, evidence_text, created_at, updated_at, priority
 		 FROM todos
-		 WHERE status = 'active'
-		 ORDER BY created_at DESC`,
+		 WHERE status = ?
+		 ORDER BY
+		   CASE WHEN priority IS NULL THEN 1 ELSE 0 END,
+		   priority DESC,
+		   updated_at DESC,
+		   created_at DESC,
+		   id DESC`,
+		status,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	return scanTodos(rows)
+}
+
+func scanTodos(rows *sql.Rows) ([]Todo, error) {
 	var todos []Todo
 	for rows.Next() {
 		var t Todo
 		var sourceFile, sourceDate, sourceHash, evidenceText sql.NullString
-		if err := rows.Scan(&t.ID, &t.Text, &t.Status, &sourceFile, &sourceDate, &sourceHash, &evidenceText, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		var priority sql.NullInt64
+		if err := rows.Scan(&t.ID, &t.Text, &t.Status, &sourceFile, &sourceDate, &sourceHash, &evidenceText, &t.CreatedAt, &t.UpdatedAt, &priority); err != nil {
 			return nil, err
 		}
 		t.SourceFile = sourceFile.String
 		t.SourceDate = sourceDate.String
 		t.SourceHash = sourceHash.String
 		t.EvidenceText = evidenceText.String
+		if priority.Valid {
+			t.HasPriority = true
+			t.Priority = int(priority.Int64)
+		}
 		todos = append(todos, t)
 	}
 	return todos, rows.Err()
@@ -369,8 +395,11 @@ func (s *Store) InsertCandidateIfNew(c Candidate) (bool, error) {
 	var count int
 	err := s.db.QueryRow(
 		`SELECT COUNT(*) FROM ai_candidates
-		 WHERE candidate_type = ? AND COALESCE(source_hash, '') = COALESCE(?, '') AND content_key = ?`,
-		c.Type, c.SourceHash, c.ContentKey,
+		 WHERE candidate_type = ? AND content_key = ? AND (
+		   (COALESCE(?, '') != '' AND COALESCE(source_date, '') = COALESCE(?, ''))
+		   OR (COALESCE(?, '') = '' AND source_file = ?)
+		 )`,
+		c.Type, c.ContentKey, c.SourceDate, c.SourceDate, c.SourceDate, c.SourceFile,
 	).Scan(&count)
 	if err != nil {
 		return false, err
@@ -426,6 +455,68 @@ func (s *Store) PendingCandidateCount() (int, error) {
 	var count int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM ai_candidates WHERE status = ?`, CandidateStatusPending).Scan(&count)
 	return count, err
+}
+
+// CandidateStatusCounts returns lifecycle counts for the review queue.
+func (s *Store) CandidateStatusCounts() (CandidateCounts, error) {
+	rows, err := s.db.Query(`SELECT status, COUNT(*) FROM ai_candidates GROUP BY status`)
+	if err != nil {
+		return CandidateCounts{}, err
+	}
+	defer rows.Close()
+
+	var counts CandidateCounts
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return CandidateCounts{}, err
+		}
+		switch status {
+		case CandidateStatusPending:
+			counts.Pending = count
+		case CandidateStatusAccepted:
+			counts.Accepted = count
+		case CandidateStatusRejected:
+			counts.Rejected = count
+		}
+	}
+	return counts, rows.Err()
+}
+
+// TodoStatusCounts returns lifecycle counts for todo board columns.
+func (s *Store) TodoStatusCounts() (TodoCounts, error) {
+	rows, err := s.db.Query(`SELECT status, COUNT(*) FROM todos GROUP BY status`)
+	if err != nil {
+		return TodoCounts{}, err
+	}
+	defer rows.Close()
+
+	var counts TodoCounts
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return TodoCounts{}, err
+		}
+		switch status {
+		case TodoStatusActive:
+			counts.Active = count
+		case TodoStatusInProgress:
+			counts.InProgress = count
+		case TodoStatusDone:
+			counts.Done = count
+		case TodoStatusWontDo:
+			counts.WontDo = count
+		case TodoStatusArchived:
+			counts.Archived = count
+		case TodoStatusOther:
+			counts.Other = count
+		default:
+			counts.Other += count
+		}
+	}
+	return counts, rows.Err()
 }
 
 // GetCandidate loads one candidate by id.
@@ -526,8 +617,9 @@ func (s *Store) AcceptCandidate(id int) error {
 func (s *Store) MarkTodoDone(id int) error {
 	now := time.Now().UTC()
 	res, err := s.db.Exec(
-		`UPDATE todos SET status = 'done', completed_at = ?, updated_at = ? WHERE id = ? AND status = 'active'`,
-		now, now, id,
+		`UPDATE todos SET status = ?, completed_at = ?, updated_at = ?
+		 WHERE id = ? AND status IN (?, ?)`,
+		TodoStatusDone, now, now, id, TodoStatusActive, TodoStatusInProgress,
 	)
 	return requireAffected(res, err, "todo")
 }
@@ -535,8 +627,42 @@ func (s *Store) MarkTodoDone(id int) error {
 // ArchiveTodo removes an active todo from the working list without marking it done.
 func (s *Store) ArchiveTodo(id int) error {
 	res, err := s.db.Exec(
-		`UPDATE todos SET status = 'archived', updated_at = ? WHERE id = ? AND status = 'active'`,
-		time.Now().UTC(), id,
+		`UPDATE todos SET status = ?, updated_at = ? WHERE id = ? AND status IN (?, ?, ?)`,
+		TodoStatusArchived, time.Now().UTC(), id, TodoStatusActive, TodoStatusInProgress, TodoStatusOther,
+	)
+	return requireAffected(res, err, "todo")
+}
+
+// SetTodoStatus updates a todo lifecycle status. It is intentionally small so AI
+// workflows can classify todos without writing SQL directly.
+func (s *Store) SetTodoStatus(id int, status string) error {
+	status, err := normalizeTodoStatus(status)
+	if err != nil {
+		return err
+	}
+	var completedAt any
+	if status == TodoStatusDone {
+		completedAt = time.Now().UTC()
+	}
+	res, err := s.db.Exec(
+		`UPDATE todos SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
+		status, completedAt, time.Now().UTC(), id,
+	)
+	return requireAffected(res, err, "todo")
+}
+
+// SetTodoPriority stores an optional 0-100 priority where higher means more important.
+func (s *Store) SetTodoPriority(id int, priority *int) error {
+	var value any
+	if priority != nil {
+		if *priority < 0 || *priority > 100 {
+			return fmt.Errorf("priority must be between 0 and 100")
+		}
+		value = *priority
+	}
+	res, err := s.db.Exec(
+		`UPDATE todos SET priority = ?, updated_at = ? WHERE id = ?`,
+		value, time.Now().UTC(), id,
 	)
 	return requireAffected(res, err, "todo")
 }
@@ -550,7 +676,7 @@ func requireAffected(res sql.Result, err error, label string) error {
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("%s not found or not active", label)
+		return fmt.Errorf("%s not found or not in a valid state", label)
 	}
 	return nil
 }
@@ -616,12 +742,24 @@ type Todo struct {
 	ID           int
 	Text         string
 	Status       string
+	Priority     int
+	HasPriority  bool
 	SourceFile   string
 	SourceDate   string
 	SourceHash   string
 	EvidenceText string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+// TodoCounts summarizes todo lifecycle state.
+type TodoCounts struct {
+	Active     int
+	InProgress int
+	Done       int
+	WontDo     int
+	Archived   int
+	Other      int
 }
 
 // Memory is an extracted piece of knowledge.
@@ -639,6 +777,13 @@ type Memory struct {
 }
 
 const (
+	TodoStatusActive     = "active"
+	TodoStatusInProgress = "in_progress"
+	TodoStatusDone       = "done"
+	TodoStatusWontDo     = "wont_do"
+	TodoStatusArchived   = "archived"
+	TodoStatusOther      = "other"
+
 	CandidateTypeTodo   = "todo"
 	CandidateTypeMemory = "memory"
 
@@ -646,6 +791,35 @@ const (
 	CandidateStatusAccepted = "accepted"
 	CandidateStatusRejected = "rejected"
 )
+
+func normalizeTodoStatus(status string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, " ", "_")
+	switch normalized {
+	case "", "todo", "open", "backlog", TodoStatusActive:
+		return TodoStatusActive, nil
+	case "doing", "started", "inprogress", TodoStatusInProgress:
+		return TodoStatusInProgress, nil
+	case "complete", "completed", TodoStatusDone:
+		return TodoStatusDone, nil
+	case "wontdo", "wont", "cancelled", "canceled", "not_doing", TodoStatusWontDo:
+		return TodoStatusWontDo, nil
+	case "archive", TodoStatusArchived:
+		return TodoStatusArchived, nil
+	case TodoStatusOther:
+		return TodoStatusOther, nil
+	default:
+		return "", fmt.Errorf("unsupported todo status %q", status)
+	}
+}
+
+// CandidateCounts summarizes review lifecycle state.
+type CandidateCounts struct {
+	Pending  int
+	Accepted int
+	Rejected int
+}
 
 // Candidate is an AI-proposed item waiting for human review.
 type Candidate struct {

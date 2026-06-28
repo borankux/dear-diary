@@ -64,26 +64,40 @@ func TestSummarizeDiaryExtractsReadableMetadata(t *testing.T) {
 	}
 }
 
-func TestHTMLWriterCapsReadOnlyDashboardLists(t *testing.T) {
+func TestHTMLWriterRendersFullTodoBoardLifecycle(t *testing.T) {
 	root := t.TempDir()
 	outDir := t.TempDir()
 	store := newTestStore(t)
 
-	for i := 0; i < maxDashboardTodos+3; i++ {
-		if err := store.InsertTodo("todo item", "/a/2026-06/2026-06-26.md"); err != nil {
-			t.Fatal(err)
-		}
+	for _, text := range []string{"low priority todo", "high priority todo", "in progress todo", "wont do todo", "other todo"} {
+		mustNoErr(t, store.InsertTodo(text, "/a/2026-06/2026-06-26.md"))
 	}
+	todos, err := store.ListActiveTodos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make(map[string]int)
+	for _, todo := range todos {
+		ids[todo.Text] = todo.ID
+	}
+	high := 90
+	low := 10
+	mustNoErr(t, store.SetTodoPriority(ids["high priority todo"], &high))
+	mustNoErr(t, store.SetTodoPriority(ids["low priority todo"], &low))
+	mustNoErr(t, store.SetTodoStatus(ids["in progress todo"], TodoStatusInProgress))
+	mustNoErr(t, store.SetTodoStatus(ids["wont do todo"], TodoStatusWontDo))
+	mustNoErr(t, store.SetTodoStatus(ids["other todo"], TodoStatusOther))
+
 	for i := 0; i < maxDashboardMemories+2; i++ {
 		if err := store.InsertMemory("memory topic", "memory summary", "/a/2026-06/2026-06-26.md"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for i := 0; i < maxDashboardCandidates+1; i++ {
+	for i := 0; i < 3; i++ {
 		inserted, err := store.InsertCandidateIfNew(Candidate{
 			Type:       CandidateTypeTodo,
-			Title:      "candidate item",
-			Content:    "candidate content",
+			Title:      "candidate item " + string(rune('a'+i)),
+			Content:    "candidate content " + string(rune('a'+i)),
 			SourceFile: "/a/2026-06/2026-06-26.md",
 			SourceHash: "hash-" + string(rune('a'+i)),
 		})
@@ -113,10 +127,21 @@ func TestHTMLWriterCapsReadOnlyDashboardLists(t *testing.T) {
 
 	for _, want := range []string{
 		"Read-only dashboard",
+		"Todo Board",
+		"Inbox",
+		"Active",
+		"In Progress",
+		"Done",
+		"Won&#39;t Do",
+		"Other",
+		"P90",
+		"high priority todo",
+		"low priority todo",
+		"in progress todo",
+		"wont do todo",
+		"other todo",
 		"日历入口",
 		"最近日记",
-		"只显示最近 12 个，还有 3 个未显示。",
-		"还有 1 条候选没有显示。",
 		"还有 2 条记忆没有显示。",
 		"2026 年 6 月",
 		`href="entries/2026-06-26.html"`,
@@ -139,6 +164,13 @@ func TestHTMLWriterCapsReadOnlyDashboardLists(t *testing.T) {
 		if !strings.Contains(dayPage, want) {
 			t.Fatalf("diary page missing %q\n%s", want, dayPage)
 		}
+	}
+}
+
+func mustNoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

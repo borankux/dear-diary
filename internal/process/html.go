@@ -18,11 +18,9 @@ import (
 )
 
 const (
-	maxDashboardCandidates = 5
-	maxDashboardTodos      = 12
-	maxDashboardMemories   = 8
-	maxDashboardDiaries    = 7
-	diaryPagesDir          = "entries"
+	maxDashboardMemories = 8
+	maxDashboardDiaries  = 7
+	diaryPagesDir        = "entries"
 )
 
 // HTMLWriter renders a compact, single-viewport dashboard to HTML.
@@ -76,22 +74,42 @@ type CalendarDay struct {
 	IsToday   bool
 }
 
+// TodoBoardColumn is a read-only lane in the todo lifecycle board.
+type TodoBoardColumn struct {
+	Key         string
+	Title       string
+	Description string
+	Count       int
+	EmptyText   string
+	Items       []TodoBoardItem
+}
+
+// TodoBoardItem is a compact card for a candidate or todo.
+type TodoBoardItem struct {
+	ID          int
+	Eyebrow     string
+	Title       string
+	Body        string
+	HasPriority bool
+	Priority    int
+	SourceDate  string
+	SourceFile  string
+	SourceURL   string
+}
+
 type dashboardData struct {
-	GeneratedAt       time.Time
-	Today             TodayStatus
-	CandidateCount    int
-	TodoCount         int
-	MemoryCount       int
-	DiaryCount        int
-	CandidateOverflow int
-	TodoOverflow      int
-	MemoryOverflow    int
-	DiaryOverflow     int
-	Candidates        []Candidate
-	Todos             []Todo
-	Memories          []Memory
-	Diaries           []DiaryEntry
-	CalendarMonths    []CalendarMonth
+	GeneratedAt      time.Time
+	Today            TodayStatus
+	CandidateCount   int
+	TodoStatusCounts TodoCounts
+	MemoryCount      int
+	DiaryCount       int
+	MemoryOverflow   int
+	DiaryOverflow    int
+	Memories         []Memory
+	Diaries          []DiaryEntry
+	CalendarMonths   []CalendarMonth
+	TodoBoardColumns []TodoBoardColumn
 }
 
 // WriteAll regenerates dashboard.html from the store and diary files.
@@ -101,6 +119,30 @@ func (w *HTMLWriter) WriteAll(store *Store) error {
 	}
 
 	todos, err := store.ListActiveTodos()
+	if err != nil {
+		return err
+	}
+	inProgressTodos, err := store.ListTodosByStatus(TodoStatusInProgress)
+	if err != nil {
+		return err
+	}
+	doneTodos, err := store.ListTodosByStatus("done")
+	if err != nil {
+		return err
+	}
+	wontDoTodos, err := store.ListTodosByStatus(TodoStatusWontDo)
+	if err != nil {
+		return err
+	}
+	archivedTodos, err := store.ListTodosByStatus("archived")
+	if err != nil {
+		return err
+	}
+	otherTodos, err := store.ListTodosByStatus(TodoStatusOther)
+	if err != nil {
+		return err
+	}
+	todoCounts, err := store.TodoStatusCounts()
 	if err != nil {
 		return err
 	}
@@ -120,27 +162,23 @@ func (w *HTMLWriter) WriteAll(store *Store) error {
 		return err
 	}
 
-	visibleCandidates, candidateOverflow := limitSlice(candidates, maxDashboardCandidates)
-	visibleTodos, todoOverflow := limitSlice(todos, maxDashboardTodos)
 	visibleMemories, memoryOverflow := limitSlice(memories, maxDashboardMemories)
 	visibleDiaries, diaryOverflow := limitSlice(diaries, maxDashboardDiaries)
+	sourceURLs := diarySourceURLs(diaries)
 
 	data := dashboardData{
-		GeneratedAt:       time.Now(),
-		Today:             w.todayStatus(),
-		CandidateCount:    len(candidates),
-		TodoCount:         len(todos),
-		MemoryCount:       len(memories),
-		DiaryCount:        len(diaries),
-		CandidateOverflow: candidateOverflow,
-		TodoOverflow:      todoOverflow,
-		MemoryOverflow:    memoryOverflow,
-		DiaryOverflow:     diaryOverflow,
-		Candidates:        visibleCandidates,
-		Todos:             visibleTodos,
-		Memories:          visibleMemories,
-		Diaries:           visibleDiaries,
-		CalendarMonths:    buildCalendarMonths(diaries, time.Now()),
+		GeneratedAt:      time.Now(),
+		Today:            w.todayStatus(),
+		CandidateCount:   len(candidates),
+		TodoStatusCounts: todoCounts,
+		MemoryCount:      len(memories),
+		DiaryCount:       len(diaries),
+		MemoryOverflow:   memoryOverflow,
+		DiaryOverflow:    diaryOverflow,
+		Memories:         visibleMemories,
+		Diaries:          visibleDiaries,
+		CalendarMonths:   buildCalendarMonths(diaries, time.Now()),
+		TodoBoardColumns: buildTodoBoardColumns(candidates, todos, inProgressTodos, doneTodos, wontDoTodos, archivedTodos, otherTodos, sourceURLs),
 	}
 
 	path := filepath.Join(w.outDir, "dashboard.html")
@@ -260,6 +298,151 @@ func limitSlice[T any](items []T, max int) ([]T, int) {
 		return items, 0
 	}
 	return items[:max], len(items) - max
+}
+
+func buildTodoBoardColumns(candidates []Candidate, activeTodos, inProgressTodos, doneTodos, wontDoTodos, archivedTodos, otherTodos []Todo, sourceURLs map[string]string) []TodoBoardColumn {
+	inboxItems := candidateBoardItems(candidates, sourceURLs)
+	activeItems := todoBoardItems(activeTodos, "todo", sourceURLs)
+	inProgressItems := todoBoardItems(inProgressTodos, "doing", sourceURLs)
+	doneItems := todoBoardItems(doneTodos, "done", sourceURLs)
+	wontDoItems := todoBoardItems(wontDoTodos, "wont do", sourceURLs)
+	archivedItems := todoBoardItems(archivedTodos, "archived", sourceURLs)
+	otherItems := todoBoardItems(otherTodos, "other", sourceURLs)
+
+	return []TodoBoardColumn{
+		{
+			Key:         "inbox",
+			Title:       "Inbox",
+			Description: "AI 候选，还没有进入可信 todo/memory。",
+			Count:       len(inboxItems),
+			EmptyText:   "没有待确认候选。",
+			Items:       inboxItems,
+		},
+		{
+			Key:         "active",
+			Title:       "Active",
+			Description: "已经接受，尚未开始或未分类的真实 todo。",
+			Count:       len(activeItems),
+			EmptyText:   "没有 active todo。",
+			Items:       activeItems,
+		},
+		{
+			Key:         "in-progress",
+			Title:       "In Progress",
+			Description: "正在做，应该优先保持可见。",
+			Count:       len(inProgressItems),
+			EmptyText:   "没有正在做的 todo。",
+			Items:       inProgressItems,
+		},
+		{
+			Key:         "done",
+			Title:       "Done",
+			Description: "最近完成的 todo，用来看到闭环。",
+			Count:       len(doneItems),
+			EmptyText:   "还没有完成记录。",
+			Items:       doneItems,
+		},
+		{
+			Key:         "wont-do",
+			Title:       "Won't Do",
+			Description: "明确不打算做，避免继续占注意力。",
+			Count:       len(wontDoItems),
+			EmptyText:   "没有不打算做的 todo。",
+			Items:       wontDoItems,
+		},
+		{
+			Key:         "archived",
+			Title:       "Archived",
+			Description: "已收起但不算完成的 todo。",
+			Count:       len(archivedItems),
+			EmptyText:   "没有归档 todo。",
+			Items:       archivedItems,
+		},
+		{
+			Key:         "other",
+			Title:       "Other",
+			Description: "AI 或人工暂时无法归类的 todo。",
+			Count:       len(otherItems),
+			EmptyText:   "没有 other todo。",
+			Items:       otherItems,
+		},
+	}
+}
+
+func candidateBoardItems(candidates []Candidate, sourceURLs map[string]string) []TodoBoardItem {
+	items := make([]TodoBoardItem, 0, len(candidates))
+	for _, c := range candidates {
+		title := firstText(c.Title, c.Content)
+		body := c.EvidenceText
+		if body == "" && c.Title != "" {
+			body = c.Content
+		}
+		sourceDate := sourceDateFor(c.SourceDate, c.SourceFile)
+		items = append(items, TodoBoardItem{
+			ID:         c.ID,
+			Eyebrow:    strings.ToUpper(c.Type),
+			Title:      truncateText(title, 110),
+			Body:       truncateText(body, 150),
+			SourceDate: sourceDate,
+			SourceFile: sourceFileLabel(c.SourceFile),
+			SourceURL:  sourceURLs[sourceDate],
+		})
+	}
+	return items
+}
+
+func todoBoardItems(todos []Todo, label string, sourceURLs map[string]string) []TodoBoardItem {
+	items := make([]TodoBoardItem, 0, len(todos))
+	for _, t := range todos {
+		sourceDate := sourceDateFor(t.SourceDate, t.SourceFile)
+		items = append(items, TodoBoardItem{
+			ID:          t.ID,
+			Eyebrow:     strings.ToUpper(label),
+			Title:       truncateText(t.Text, 120),
+			Body:        truncateText(t.EvidenceText, 150),
+			HasPriority: t.HasPriority,
+			Priority:    t.Priority,
+			SourceDate:  sourceDate,
+			SourceFile:  sourceFileLabel(t.SourceFile),
+			SourceURL:   sourceURLs[sourceDate],
+		})
+	}
+	return items
+}
+
+func diarySourceURLs(diaries []DiaryEntry) map[string]string {
+	sourceURLs := make(map[string]string, len(diaries))
+	for _, entry := range diaries {
+		sourceURLs[entry.Date] = entry.URL
+	}
+	return sourceURLs
+}
+
+func sourceDateFor(sourceDate, sourceFile string) string {
+	if sourceDate != "" {
+		return sourceDate
+	}
+	name := strings.TrimSuffix(filepath.Base(sourceFile), ".md")
+	if _, err := time.Parse("2006-01-02", name); err == nil {
+		return name
+	}
+	return ""
+}
+
+func sourceFileLabel(sourceFile string) string {
+	if sourceFile == "" {
+		return ""
+	}
+	return filepath.Base(sourceFile)
+}
+
+func firstText(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func summarizeDiary(src []byte) (string, []byte, []string, string) {
@@ -436,20 +619,27 @@ const dashboardTemplate = `<!DOCTYPE html>
 	<style>
 		:root {
 			color-scheme: light;
-			--bg: #f6f7f8;
+			--bg: #eef2f1;
 			--paper: #ffffff;
-			--ink: #202124;
-			--text: #31343a;
-			--muted: #727780;
-			--quiet: #eef0f3;
-			--line: #dfe3e8;
-			--line-strong: #c7cdd5;
+			--paper-soft: #f8faf9;
+			--ink: #17201d;
+			--text: #34413d;
+			--muted: #6b7672;
+			--quiet: #e7ecea;
+			--line: #d9e0dd;
+			--line-strong: #b9c5c0;
 			--accent: #0f766e;
+			--active: #2563eb;
+			--progress: #0f766e;
+			--done: #15803d;
+			--wont: #b91c1c;
+			--archived: #64748b;
+			--other: #525252;
 			--attention: #b45309;
-			--memory: #475569;
-			--danger: #b91c1c;
+			--memory: #7c3f22;
 			--radius: 8px;
-			--shadow: 0 1px 2px rgba(30, 41, 59, 0.08);
+			--shadow: 0 16px 42px rgba(23, 32, 29, 0.08);
+			--hairline: 1px solid var(--line);
 		}
 		* { box-sizing: border-box; }
 		html, body {
@@ -457,17 +647,23 @@ const dashboardTemplate = `<!DOCTYPE html>
 			padding: 0;
 		}
 		body {
-			font-family: "Avenir Next", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
-			background: var(--bg);
+			font-family: "Avenir Next", "Hiragino Sans", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+			background:
+				linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0) 360px),
+				repeating-linear-gradient(90deg, rgba(23, 32, 29, 0.035) 0, rgba(23, 32, 29, 0.035) 1px, transparent 1px, transparent 96px),
+				var(--bg);
 			color: var(--ink);
 			-webkit-font-smoothing: antialiased;
 			-moz-osx-font-smoothing: grayscale;
 			text-wrap: pretty;
 		}
+		a {
+			color: inherit;
+		}
 		.app {
-			width: min(1320px, calc(100% - 32px));
+			width: min(1480px, calc(100% - 36px));
 			margin: 0 auto;
-			padding: 28px 0 48px;
+			padding: 30px 0 56px;
 		}
 		header {
 			display: flex;
@@ -475,11 +671,13 @@ const dashboardTemplate = `<!DOCTYPE html>
 			justify-content: space-between;
 			gap: 24px;
 			padding-bottom: 18px;
-			border-bottom: 1px solid var(--line);
+			border-bottom: var(--hairline);
 		}
 		header h1 {
 			margin: 0;
-			font-size: 1.6rem;
+			font-family: "Iowan Old Style", "Songti SC", Georgia, serif;
+			font-size: clamp(2rem, 4vw, 4.2rem);
+			line-height: 0.92;
 			font-weight: 700;
 			letter-spacing: 0;
 		}
@@ -488,106 +686,266 @@ const dashboardTemplate = `<!DOCTYPE html>
 		.overflow-note,
 		.source,
 		.entry-meta,
-		.month-count {
+		.month-count,
+		.board-description,
+		.card-meta {
 			color: var(--muted);
 			font-size: 0.78rem;
 			font-variant-numeric: tabular-nums;
 		}
 		.kicker {
-			margin-bottom: 4px;
-			text-transform: uppercase;
-			font-size: 0.68rem;
+			margin-bottom: 8px;
+			font-size: 0.72rem;
 			font-weight: 800;
-			letter-spacing: 0.08em;
+			letter-spacing: 0;
+			text-transform: uppercase;
 		}
 		.briefing {
-			padding: 22px 0 24px;
-			border-bottom: 1px solid var(--line);
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) minmax(360px, 540px);
+			gap: 28px;
+			padding: 26px 0 30px;
+			border-bottom: var(--hairline);
+			align-items: end;
 		}
 		.briefing h2 {
+			max-width: 980px;
 			margin: 0;
-			font-size: clamp(1.55rem, 2vw, 2.25rem);
-			line-height: 1.18;
-			font-weight: 700;
+			font-size: clamp(1.65rem, 2.4vw, 3rem);
+			line-height: 1.06;
+			font-weight: 800;
+			letter-spacing: 0;
+			overflow-wrap: anywhere;
 		}
 		.briefing p {
-			max-width: 860px;
-			margin: 10px 0 0;
+			max-width: 760px;
+			margin: 12px 0 0;
 			color: var(--text);
 			font-size: 1rem;
-			line-height: 1.55;
+			line-height: 1.58;
+			overflow-wrap: anywhere;
 		}
 		.metric-row {
 			display: grid;
-			grid-template-columns: repeat(4, minmax(0, 1fr));
+			grid-template-columns: repeat(3, minmax(0, 1fr));
 			gap: 10px;
-			margin-top: 18px;
 		}
 		.metric {
-			background: var(--paper);
-			border: 1px solid var(--line);
+			background: rgba(255, 255, 255, 0.82);
+			border: var(--hairline);
 			border-radius: var(--radius);
-			padding: 12px 14px;
-			box-shadow: var(--shadow);
+			padding: 14px 15px;
+			box-shadow: 0 8px 28px rgba(23, 32, 29, 0.06);
+			min-width: 0;
 		}
 		.metric strong {
 			display: block;
-			font-size: 1.45rem;
+			font-size: 1.55rem;
 			line-height: 1;
 			font-variant-numeric: tabular-nums;
 		}
 		.metric span {
 			display: block;
-			margin-top: 5px;
+			margin-top: 6px;
 			color: var(--muted);
 			font-size: 0.78rem;
 		}
-		.content-grid {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) 360px;
-			gap: 28px;
-			margin-top: 28px;
-			align-items: start;
-			min-width: 0;
-		}
-		main,
-		aside,
-		.section,
-		.diary-entry {
-			min-width: 0;
-		}
 		.section {
-			padding-top: 18px;
-			border-top: 1px solid var(--line);
+			min-width: 0;
+			padding-top: 24px;
+			border-top: var(--hairline);
 		}
 		.section + .section {
-			margin-top: 30px;
+			margin-top: 34px;
 		}
 		.section-header {
 			display: flex;
 			align-items: baseline;
 			justify-content: space-between;
 			gap: 16px;
-			margin-bottom: 12px;
+			margin-bottom: 14px;
 			min-width: 0;
 		}
 		.section h2 {
 			margin: 0;
-			font-size: 0.95rem;
-			font-weight: 800;
+			font-size: 1.02rem;
+			font-weight: 900;
 			letter-spacing: 0;
+		}
+		.todo-board {
+			border-top: 0;
+			padding-top: 24px;
+		}
+		.board-grid {
+			display: grid;
+			grid-template-columns: repeat(7, minmax(260px, 1fr));
+			gap: 16px;
+			align-items: start;
+			min-width: 0;
+			overflow-x: auto;
+			padding-bottom: 12px;
+		}
+		.board-column {
+			min-width: 0;
+			padding-top: 10px;
+			border-top: 4px solid var(--line-strong);
+		}
+		.board-inbox { border-top-color: var(--attention); }
+		.board-active { border-top-color: var(--active); }
+		.board-in-progress { border-top-color: var(--progress); }
+		.board-done { border-top-color: var(--done); }
+		.board-wont-do { border-top-color: var(--wont); }
+		.board-archived { border-top-color: var(--archived); }
+		.board-other { border-top-color: var(--other); }
+		.board-column header {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 10px;
+			align-items: start;
+			padding: 0 0 10px;
+			border: 0;
+		}
+		.board-column h3 {
+			margin: 0;
+			font-size: 0.95rem;
+			line-height: 1.2;
+			font-weight: 900;
+			letter-spacing: 0;
+		}
+		.board-count {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			min-width: 32px;
+			height: 26px;
+			padding: 0 8px;
+			border-radius: 999px;
+			background: var(--ink);
+			color: #fff;
+			font-size: 0.76rem;
+			font-weight: 900;
+			font-variant-numeric: tabular-nums;
+		}
+		.board-description {
+			margin: 4px 0 0;
+			line-height: 1.35;
+		}
+		.board-list {
+			display: grid;
+			gap: 10px;
+			min-width: 0;
+		}
+		.board-card,
+		.memory-card,
+		.diary-entry,
+		.calendar-month {
+			background: var(--paper);
+			border: var(--hairline);
+			border-radius: var(--radius);
+			box-shadow: var(--shadow);
+			min-width: 0;
+			overflow: hidden;
+		}
+		.board-card {
+			padding: 12px;
+			box-shadow: 0 10px 28px rgba(23, 32, 29, 0.07);
+			overflow-wrap: anywhere;
+			word-break: break-word;
+		}
+		.card-meta {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
+			margin-bottom: 8px;
+		}
+		.card-right {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			flex: 0 0 auto;
+		}
+		.card-type {
+			font-size: 0.68rem;
+			font-weight: 900;
+			color: var(--muted);
+			text-transform: uppercase;
+			letter-spacing: 0;
+		}
+		.card-id {
+			font-weight: 900;
+			color: var(--ink);
+		}
+		.priority-badge {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			min-width: 30px;
+			height: 20px;
+			padding: 0 7px;
+			border-radius: 999px;
+			background: #fff4d6;
+			color: #8a4b00;
+			border: 1px solid #e8c36c;
+			font-size: 0.68rem;
+			font-weight: 950;
+			font-variant-numeric: tabular-nums;
+		}
+		.board-card strong {
+			display: block;
+			font-size: 0.88rem;
+			line-height: 1.38;
+			font-weight: 850;
+			overflow-wrap: anywhere;
+			word-break: break-word;
+		}
+		.board-card p {
+			margin: 7px 0 0;
+			color: var(--text);
+			font-size: 0.82rem;
+			line-height: 1.45;
+			overflow-wrap: anywhere;
+			word-break: break-word;
+		}
+		.source {
+			margin-top: 9px;
+			line-height: 1.35;
+			overflow-wrap: anywhere;
+		}
+		.source a,
+		.entry-link {
+			color: var(--accent);
+			text-decoration: none;
+			font-weight: 850;
+		}
+		.source a:hover,
+		.entry-link:hover {
+			text-decoration: underline;
+		}
+		.empty {
+			border: 1px dashed var(--line-strong);
+			border-radius: var(--radius);
+			color: var(--muted);
+			font-size: 0.86rem;
+			padding: 16px;
+			background: rgba(255, 255, 255, 0.58);
+		}
+		.content-grid {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) 380px;
+			gap: 28px;
+			margin-top: 30px;
+			align-items: start;
+			min-width: 0;
+		}
+		main,
+		aside,
+		.diary-entry {
+			min-width: 0;
 		}
 		.calendar-months {
 			display: grid;
 			gap: 12px;
-		}
-		.calendar-month {
-			background: var(--paper);
-			border: 1px solid var(--line);
-			border-radius: var(--radius);
-			box-shadow: var(--shadow);
-			overflow: hidden;
-			min-width: 0;
 		}
 		.calendar-month summary {
 			list-style: none;
@@ -597,7 +955,7 @@ const dashboardTemplate = `<!DOCTYPE html>
 			justify-content: space-between;
 			gap: 12px;
 			padding: 13px 14px;
-			border-bottom: 1px solid var(--line);
+			border-bottom: var(--hairline);
 		}
 		.calendar-month summary::-webkit-details-marker { display: none; }
 		.calendar-month strong {
@@ -614,7 +972,7 @@ const dashboardTemplate = `<!DOCTYPE html>
 			padding: 12px 14px 0;
 			color: var(--muted);
 			font-size: 0.72rem;
-			font-weight: 800;
+			font-weight: 850;
 			text-align: center;
 		}
 		.calendar-grid {
@@ -623,10 +981,10 @@ const dashboardTemplate = `<!DOCTYPE html>
 		.calendar-cell {
 			min-width: 0;
 			min-height: 46px;
-			border: 1px solid var(--line);
+			border: var(--hairline);
 			border-radius: 7px;
 			padding: 6px;
-			background: #fbfcfd;
+			background: var(--paper-soft);
 			color: var(--muted);
 			font-size: 0.78rem;
 			font-variant-numeric: tabular-nums;
@@ -642,10 +1000,10 @@ const dashboardTemplate = `<!DOCTYPE html>
 			justify-content: space-between;
 		}
 		.calendar-day.is-written {
-			background: #e9f7f3;
-			border-color: #b8ddd3;
+			background: #e5f5ef;
+			border-color: #a8d8c5;
 			color: var(--accent);
-			font-weight: 800;
+			font-weight: 850;
 		}
 		.calendar-day.is-today {
 			border-color: var(--attention);
@@ -654,16 +1012,11 @@ const dashboardTemplate = `<!DOCTYPE html>
 		.calendar-day small {
 			color: inherit;
 			font-size: 0.65rem;
-			font-weight: 700;
+			font-weight: 800;
 			white-space: nowrap;
 		}
 		.diary-entry {
-			background: var(--paper);
-			border: 1px solid var(--line);
-			border-radius: var(--radius);
-			box-shadow: var(--shadow);
 			margin-bottom: 14px;
-			overflow: hidden;
 		}
 		.diary-entry summary {
 			list-style: none;
@@ -681,10 +1034,11 @@ const dashboardTemplate = `<!DOCTYPE html>
 		.diary-entry summary::-webkit-details-marker { display: none; }
 		.entry-title {
 			margin: 0;
-			font-size: 1.05rem;
+			font-size: 1.08rem;
 			line-height: 1.25;
-			font-weight: 800;
+			font-weight: 900;
 			overflow-wrap: anywhere;
+			word-break: break-word;
 		}
 		.entry-excerpt {
 			margin: 7px 0 0;
@@ -692,14 +1046,7 @@ const dashboardTemplate = `<!DOCTYPE html>
 			font-size: 0.88rem;
 			line-height: 1.45;
 			overflow-wrap: anywhere;
-		}
-		.entry-link {
-			color: var(--accent);
-			text-decoration: none;
-			font-weight: 800;
-		}
-		.entry-link:hover {
-			text-decoration: underline;
+			word-break: break-word;
 		}
 		.section-pills {
 			display: flex;
@@ -721,27 +1068,28 @@ const dashboardTemplate = `<!DOCTYPE html>
 			font-variant-numeric: tabular-nums;
 		}
 		.markdown {
-			border-top: 1px solid var(--line);
+			border-top: var(--hairline);
 			padding: 22px 20px 28px;
-			font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
-			font-size: 1.03rem;
+			font-family: "Iowan Old Style", "Songti SC", Georgia, serif;
+			font-size: 1.04rem;
 			line-height: 1.72;
 			color: var(--text);
-			max-width: 780px;
+			max-width: 820px;
 			min-width: 0;
 			overflow-wrap: anywhere;
+			word-break: break-word;
 		}
 		.markdown h1 { display: none; }
 		.markdown h2,
 		.markdown h3 {
-			font-family: "Avenir Next", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
-			font-size: 0.88rem;
+			font-family: "Avenir Next", "Hiragino Sans", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+			font-size: 0.9rem;
 			line-height: 1.3;
 			margin: 1.6rem 0 0.65rem;
 			padding-top: 0.9rem;
-			border-top: 1px solid var(--line);
+			border-top: var(--hairline);
 			color: var(--ink);
-			font-weight: 800;
+			font-weight: 900;
 		}
 		.markdown h2:first-child,
 		.markdown h3:first-child {
@@ -785,7 +1133,7 @@ const dashboardTemplate = `<!DOCTYPE html>
 			width: 100%;
 			border-collapse: collapse;
 			margin: 1rem 0;
-			font-family: "Avenir Next", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+			font-family: "Avenir Next", "Hiragino Sans", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
 			font-size: 0.88rem;
 		}
 		.markdown img {
@@ -794,75 +1142,56 @@ const dashboardTemplate = `<!DOCTYPE html>
 		}
 		.markdown th,
 		.markdown td {
-			border-bottom: 1px solid var(--line);
+			border-bottom: var(--hairline);
 			padding: 8px 10px;
 			text-align: left;
 			vertical-align: top;
 		}
-		.item-list {
-			display: flex;
-			flex-direction: column;
-			gap: 8px;
+		.memory-list {
+			display: grid;
+			gap: 10px;
 		}
-		.item {
-			background: var(--paper);
-			border: 1px solid var(--line);
-			border-radius: var(--radius);
-			padding: 12px 13px;
-			box-shadow: var(--shadow);
-			min-width: 0;
+		.memory-card {
+			padding: 13px;
+			box-shadow: 0 10px 28px rgba(23, 32, 29, 0.06);
 			overflow-wrap: anywhere;
+			word-break: break-word;
 		}
-		.item strong {
+		.memory-card strong {
 			display: block;
-			font-size: 0.86rem;
-			line-height: 1.38;
-			font-weight: 800;
+			color: var(--memory);
+			font-size: 0.88rem;
+			line-height: 1.35;
+			font-weight: 900;
+			overflow-wrap: anywhere;
+			word-break: break-word;
 		}
-		.item p {
-			margin: 6px 0 0;
+		.memory-card p {
+			margin: 7px 0 0;
 			color: var(--text);
 			font-size: 0.82rem;
 			line-height: 1.45;
-		}
-		.item .type {
-			display: inline-block;
-			margin-bottom: 6px;
-			color: var(--accent);
-			font-size: 0.7rem;
-			font-weight: 800;
-			text-transform: uppercase;
-			font-variant-numeric: tabular-nums;
-		}
-		.todo-id {
-			color: var(--attention);
-			font-weight: 800;
-			font-variant-numeric: tabular-nums;
-		}
-		.memory-topic {
-			color: var(--memory);
-		}
-		.empty {
-			background: var(--paper);
-			border: 1px dashed var(--line-strong);
-			border-radius: var(--radius);
-			color: var(--muted);
-			font-size: 0.86rem;
-			padding: 18px;
-		}
-		.source {
-			margin-top: 7px;
 			overflow-wrap: anywhere;
+			word-break: break-word;
+		}
+		@media (max-width: 1180px) {
+			.briefing { grid-template-columns: 1fr; }
+			.metric-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+			.board-grid {
+				grid-template-columns: repeat(7, minmax(250px, 1fr));
+			}
 		}
 		@media (max-width: 980px) {
-			.app { width: min(100% - 24px, 760px); padding-top: 20px; }
+			.app { width: calc(100% - 24px); max-width: 820px; padding-top: 22px; }
 			header { align-items: flex-start; flex-direction: column; gap: 8px; }
 			.metric-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 			.content-grid { grid-template-columns: 1fr; gap: 18px; }
 		}
-		@media (max-width: 560px) {
-			.app { width: min(100% - 20px, 760px); }
-			.metric-row { grid-template-columns: 1fr; }
+		@media (max-width: 640px) {
+			.app { width: calc(100% - 20px); max-width: 820px; }
+			.briefing h2 { font-size: 1.45rem; line-height: 1.18; }
+			.metric-row,
+			.board-grid { grid-template-columns: 1fr; }
 			.section-header { align-items: flex-start; flex-direction: column; gap: 4px; }
 			.calendar-month summary { align-items: flex-start; flex-direction: column; gap: 4px; }
 			.calendar-grid { gap: 3px; padding-left: 10px; padding-right: 10px; }
@@ -889,28 +1218,107 @@ const dashboardTemplate = `<!DOCTYPE html>
 		</header>
 
 		<section class="briefing" aria-labelledby="briefing-title">
-			<h2 id="briefing-title">
-				{{if .Today.Exists}}今天已写 {{.Today.Sections}} 段。{{else}}今天还没有写日记。{{end}}
-				{{if .CandidateCount}}{{.CandidateCount}} 条候选需要看。{{else}}没有待确认候选。{{end}}
-			</h2>
-			<p>
-				当前有 {{.TodoCount}} 个 active todos、{{.MemoryCount}} 条长期记忆、{{.DiaryCount}} 篇日记。
-				这个页面只做阅读和判断重点：月历负责进入每天的日记，最近日记优先，注意力队列限量展示。
-			</p>
+			<div>
+				<div class="kicker">Daily closure</div>
+				<h2 id="briefing-title">
+					{{if .Today.Exists}}今天已写 {{.Today.Sections}} 段。{{else}}今天还没有写日记。{{end}}
+					{{if .CandidateCount}}{{.CandidateCount}} 条候选还在 inbox。{{else}}Inbox 已清空。{{end}}
+				</h2>
+				<p>
+					{{.TodoStatusCounts.Active}} 个 active，{{.TodoStatusCounts.InProgress}} 个正在做，{{.TodoStatusCounts.Done}} 个已完成，{{.TodoStatusCounts.WontDo}} 个不打算做，{{.TodoStatusCounts.Archived}} 个已归档。
+					日记共 {{.DiaryCount}} 篇，长期记忆 {{.MemoryCount}} 条。
+				</p>
+			</div>
 			<div class="metric-row" aria-label="Dashboard counts">
-				<div class="metric"><strong>{{.CandidateCount}}</strong><span>候选待确认</span></div>
-				<div class="metric"><strong>{{.TodoCount}}</strong><span>Active todos</span></div>
-				<div class="metric"><strong>{{.MemoryCount}}</strong><span>长期记忆</span></div>
-				<div class="metric"><strong>{{.DiaryCount}}</strong><span>日记总数</span></div>
+				<div class="metric"><strong>{{.CandidateCount}}</strong><span>Inbox candidates</span></div>
+				<div class="metric"><strong>{{.TodoStatusCounts.Active}}</strong><span>Active todos</span></div>
+				<div class="metric"><strong>{{.TodoStatusCounts.InProgress}}</strong><span>In progress</span></div>
+				<div class="metric"><strong>{{.TodoStatusCounts.Done}}</strong><span>Done todos</span></div>
+				<div class="metric"><strong>{{.TodoStatusCounts.WontDo}}</strong><span>Won't do</span></div>
+				<div class="metric"><strong>{{.DiaryCount}}</strong><span>Diary entries</span></div>
+			</div>
+		</section>
+
+		<section class="section todo-board" aria-labelledby="todo-board-title">
+			<div class="section-header">
+				<h2 id="todo-board-title">Todo Board</h2>
+				<div class="meta">全部展示 · 有 priority 时按高到低排序</div>
+			</div>
+			<div class="board-grid">
+				{{range .TodoBoardColumns}}
+				<section class="board-column board-{{.Key}}" aria-labelledby="board-{{.Key}}">
+					<header>
+						<div>
+							<h3 id="board-{{.Key}}">{{.Title}}</h3>
+							<p class="board-description">{{.Description}}</p>
+						</div>
+						<span class="board-count">{{.Count}}</span>
+					</header>
+					{{if .Items}}
+					<div class="board-list">
+						{{range .Items}}
+						<article class="board-card">
+							<div class="card-meta">
+								<span class="card-type">{{.Eyebrow}}</span>
+								<span class="card-right">
+									{{if .HasPriority}}<span class="priority-badge">P{{.Priority}}</span>{{end}}
+									<span class="card-id">#{{.ID}}</span>
+								</span>
+							</div>
+							<strong>{{.Title}}</strong>
+							{{if .Body}}<p>{{.Body}}</p>{{end}}
+							{{if .SourceDate}}
+								<div class="source">{{if .SourceURL}}<a href="{{.SourceURL}}">{{.SourceDate}}</a>{{else}}{{.SourceDate}}{{end}}</div>
+							{{else if .SourceFile}}
+								<div class="source">{{.SourceFile}}</div>
+							{{end}}
+						</article>
+						{{end}}
+						</div>
+						{{else}}
+							<div class="empty">{{.EmptyText}}</div>
+						{{end}}
+				</section>
+				{{end}}
 			</div>
 		</section>
 
 		<div class="content-grid">
 			<main>
+				<section class="section" aria-labelledby="diary-title">
+					<div class="section-header">
+						<h2 id="diary-title">最近日记</h2>
+						<div class="meta">最近 {{len .Diaries}} 篇{{if .DiaryOverflow}} · 还有 {{.DiaryOverflow}} 篇在日历里{{end}}</div>
+					</div>
+					{{if .Diaries}}
+						{{range .Diaries}}
+						<details class="diary-entry" {{if .Open}}open{{end}}>
+							<summary>
+								<div>
+									<h3 class="entry-title">{{.Title}}</h3>
+									{{if .Excerpt}}<p class="entry-excerpt">{{.Excerpt}}</p>{{end}}
+								</div>
+								<div class="entry-meta">{{.Date}} · {{len .Sections}} 段 · <a class="entry-link" href="{{.URL}}">日记页</a></div>
+							</summary>
+							{{if .Sections}}
+							<div class="section-pills" aria-label="Diary sections">
+								{{range .Sections}}<span class="pill">{{.}}</span>{{end}}
+							</div>
+							{{end}}
+							<div class="markdown">{{.HTML}}</div>
+						</details>
+						{{end}}
+					{{else}}
+						<div class="empty">还没有找到 canonical diary 文件。</div>
+					{{end}}
+				</section>
+			</main>
+
+			<aside>
 				<section class="section" aria-labelledby="calendar-title">
 					<div class="section-header">
 						<h2 id="calendar-title">日历入口</h2>
-						<div class="meta">周一开头 · 点击有标记的日期打开日记页</div>
+						<div class="meta">周一开头</div>
 					</div>
 					{{if .CalendarMonths}}
 					<div class="calendar-months">
@@ -948,92 +1356,19 @@ const dashboardTemplate = `<!DOCTYPE html>
 					{{end}}
 				</section>
 
-				<section class="section" aria-labelledby="diary-title">
-					<div class="section-header">
-						<h2 id="diary-title">最近日记</h2>
-						<div class="meta">显示最近 {{len .Diaries}} 篇{{if .DiaryOverflow}}，完整历史从日历进入{{end}}</div>
-					</div>
-					{{if .Diaries}}
-						{{range .Diaries}}
-						<details class="diary-entry" {{if .Open}}open{{end}}>
-							<summary>
-								<div>
-									<h3 class="entry-title">{{.Title}}</h3>
-									{{if .Excerpt}}<p class="entry-excerpt">{{.Excerpt}}</p>{{end}}
-								</div>
-								<div class="entry-meta">{{.Date}} · {{len .Sections}} 段 · <a class="entry-link" href="{{.URL}}">打开日记页</a></div>
-							</summary>
-							{{if .Sections}}
-							<div class="section-pills" aria-label="Diary sections">
-								{{range .Sections}}<span class="pill">{{.}}</span>{{end}}
-							</div>
-							{{end}}
-							<div class="markdown">{{.HTML}}</div>
-						</details>
-						{{end}}
-					{{else}}
-						<div class="empty">还没有找到 canonical diary 文件。</div>
-					{{end}}
-				</section>
-			</main>
-
-			<aside>
-				<section class="section" aria-labelledby="candidate-title">
-					<div class="section-header">
-						<h2 id="candidate-title">候选待确认</h2>
-						<div class="meta">{{.CandidateCount}}</div>
-					</div>
-					{{if .Candidates}}
-					<div class="item-list">
-						{{range .Candidates}}
-						<div class="item">
-							<span class="type">{{.Type}} #{{.ID}}</span>
-							<strong>{{if .Title}}{{.Title}}{{else}}{{.Content}}{{end}}</strong>
-							{{if .EvidenceText}}<p>{{.EvidenceText}}</p>{{end}}
-							{{if .SourceDate}}<div class="source">{{.SourceDate}}</div>{{end}}
-						</div>
-						{{end}}
-					</div>
-					{{if .CandidateOverflow}}<p class="overflow-note">还有 {{.CandidateOverflow}} 条候选没有显示。</p>{{end}}
-					{{else}}
-						<div class="empty">没有待确认候选。</div>
-					{{end}}
-				</section>
-
-				<section class="section" aria-labelledby="todo-title">
-					<div class="section-header">
-						<h2 id="todo-title">Active todos</h2>
-						<div class="meta">{{.TodoCount}}</div>
-					</div>
-					{{if .Todos}}
-					<div class="item-list">
-						{{range .Todos}}
-						<div class="item">
-							<strong><span class="todo-id">#{{.ID}}</span> {{.Text}}</strong>
-							{{if .EvidenceText}}<p>{{.EvidenceText}}</p>{{end}}
-							{{if .SourceDate}}<div class="source">{{.SourceDate}}</div>{{else if .SourceFile}}<div class="source">{{.SourceFile}}</div>{{end}}
-						</div>
-						{{end}}
-					</div>
-					{{if .TodoOverflow}}<p class="overflow-note">只显示最近 {{len .Todos}} 个，还有 {{.TodoOverflow}} 个未显示。</p>{{end}}
-					{{else}}
-						<div class="empty">没有 active todo。</div>
-					{{end}}
-				</section>
-
 				<section class="section" aria-labelledby="memory-title">
 					<div class="section-header">
 						<h2 id="memory-title">长期记忆</h2>
 						<div class="meta">{{.MemoryCount}}</div>
 					</div>
 					{{if .Memories}}
-					<div class="item-list">
+					<div class="memory-list">
 						{{range .Memories}}
-						<div class="item">
-							<strong class="memory-topic">{{.Topic}}</strong>
+						<article class="memory-card">
+							<strong>{{.Topic}}</strong>
 							<p>{{.Summary}}</p>
 							{{if .SourceDate}}<div class="source">{{.SourceDate}}</div>{{else if .SourceFile}}<div class="source">{{.SourceFile}}</div>{{end}}
-						</div>
+						</article>
 						{{end}}
 					</div>
 					{{if .MemoryOverflow}}<p class="overflow-note">还有 {{.MemoryOverflow}} 条记忆没有显示。</p>{{end}}
