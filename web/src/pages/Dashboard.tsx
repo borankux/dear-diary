@@ -91,7 +91,7 @@ export default function Dashboard() {
   }
 
   const groupedTodos = BOARD_COLUMNS.slice(1).reduce<Record<string, Todo[]>>((acc, col) => {
-    acc[col.key] = todos.filter((t) => t.status === col.key.replace('-', '_'));
+    acc[col.key] = (todos || []).filter((t) => t.status === col.key.replace('-', '_'));
     return acc;
   }, {});
 

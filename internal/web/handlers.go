@@ -100,7 +100,7 @@ func handleTodos(w http.ResponseWriter, r *http.Request) {
 	defer store.Close()
 
 	// Return all todos across all statuses
-	var allTodos []process.Todo
+	allTodos := make([]process.Todo, 0)
 	for _, status := range []string{process.TodoStatusActive, process.TodoStatusInProgress, process.TodoStatusDone, process.TodoStatusWontDo, process.TodoStatusArchived, process.TodoStatusOther} {
 		todos, err := store.ListTodosByStatus(status)
 		if err != nil {
@@ -153,6 +153,9 @@ func handleCandidates(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
+	}
+	if candidates == nil {
+		candidates = []process.Candidate{}
 	}
 	writeJSON(w, 200, candidates)
 }
@@ -212,6 +215,9 @@ func handleMemories(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
+	if memories == nil {
+		memories = []process.Memory{}
+	}
 	writeJSON(w, 200, memories)
 }
 
@@ -233,7 +239,7 @@ func handleDiaries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Filter canonical + sort reverse + limit 30
-	var entries []diaryListEntry
+	entries := make([]diaryListEntry, 0)
 	for _, path := range files {
 		if !storage.IsDiaryFilePath(path) {
 			continue
@@ -383,7 +389,7 @@ func handleCalendar(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(months)))
 
-	var result []calendarMonthAPI
+	result := make([]calendarMonthAPI, 0)
 	for _, month := range months {
 		start := monthStarts[month]
 		daysInMonth := time.Date(start.Year(), start.Month()+1, 0, 0, 0, 0, 0, time.Local).Day()
@@ -454,7 +460,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		date := res.Date
 		grouped[date] = append(grouped[date], searchLine{LineNum: res.Line, Text: res.Text})
 	}
-	var apiResults []searchResult
+	apiResults := make([]searchResult, 0)
 	for date, lines := range grouped {
 		apiResults = append(apiResults, searchResult{
 			Date:  date,
