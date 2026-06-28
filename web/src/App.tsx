@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { isAuthenticated } from './api';
+import { isAuthenticated, clearAuthToken } from './api';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Calendar from './pages/Calendar';
@@ -21,6 +21,7 @@ function App() {
 
   useEffect(() => {
     function handleAuthRequired() {
+      clearAuthToken();
       navigate('/login', { replace: true });
     }
     window.addEventListener('auth:required', handleAuthRequired);
