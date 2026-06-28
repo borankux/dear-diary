@@ -140,6 +140,12 @@ export function rejectCandidate(id: number) {
   return apiPost<{ ok: boolean }>(`/candidates/${id}/reject`);
 }
 
-export function login(password: string): Promise<{ token: string }> {
-  return apiPost<{ token: string }>('/auth/login', { password });
+export async function login(password: string): Promise<{ token: string }> {
+  const res = await fetch('/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }

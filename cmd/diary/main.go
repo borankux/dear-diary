@@ -494,18 +494,41 @@ func runSync(args []string) error {
 		fmt.Println("已初始化 Git 仓库并创建 .gitignore")
 	}
 
-	// 检查 remote
+	// 检查/配置 remote
 	remoteURL := os.Getenv("DIARY_REMOTE_URL")
+	remoteName := "origin"
 	if remoteURL == "" {
-		remoteURL = "origin"
+		// 尝试从现有 remote 读取
+		cmd := exec.Command("git", "remote", "get-url", "origin")
+		cmd.Dir = rootDir
+		out, err := cmd.Output()
+		if err == nil && len(out) > 0 {
+			remoteURL = strings.TrimSpace(string(out))
+		} else {
+			return fmt.Errorf("未设置 DIARY_REMOTE_URL 环境变量，且本地没有配置 origin remote\n\n请设置环境变量:\n  export DIARY_REMOTE_URL=ssh://pb/var/lib/dear-diary\n\n或在日记目录中手动配置:\n  cd %s && git remote add origin ssh://pb/var/lib/dear-diary", rootDir)
+		}
+	} else if strings.Contains(remoteURL, "://") || strings.Contains(remoteURL, "@") {
+		// remoteURL 是一个 URL，需要配置 remote
+		cmd := exec.Command("git", "remote", "add", "origin", remoteURL)
+		cmd.Dir = rootDir
+		if err := cmd.Run(); err != nil {
+			// 可能已经存在，尝试更新
+			cmd = exec.Command("git", "remote", "set-url", "origin", remoteURL)
+			cmd.Dir = rootDir
+			_ = cmd.Run()
+		}
+	} else {
+		remoteName = remoteURL
 	}
+
+	branch := "main"
 
 	// 如果是 pull 命令
 	if len(args) > 0 && args[0] == "pull" {
 		fmt.Println("正在从远程拉取日记...")
-		if err := execGit(rootDir, "pull", remoteURL, "main"); err != nil {
+		if err := execGit(rootDir, "pull", remoteName, branch); err != nil {
 			// 尝试 master 分支
-			if err := execGit(rootDir, "pull", remoteURL, "master"); err != nil {
+			if err := execGit(rootDir, "pull", remoteName, "master"); err != nil {
 				return fmt.Errorf("git pull 失败: %w", err)
 			}
 		}
@@ -526,8 +549,8 @@ func runSync(args []string) error {
 	}
 	if !hasChanges {
 		fmt.Println("没有变更需要提交，直接推送...")
-		if err := execGit(rootDir, "push", remoteURL, "main"); err != nil {
-			if err := execGit(rootDir, "push", remoteURL, "master"); err != nil {
+		if err := execGit(rootDir, "push", remoteName, branch); err != nil {
+			if err := execGit(rootDir, "push", remoteName, "master"); err != nil {
 				return fmt.Errorf("git push 失败: %w", err)
 			}
 		}
@@ -539,8 +562,8 @@ func runSync(args []string) error {
 	if err := execGit(rootDir, "commit", "-m", commitMsg); err != nil {
 		return fmt.Errorf("git commit 失败: %w", err)
 	}
-	if err := execGit(rootDir, "push", remoteURL, "main"); err != nil {
-		if err := execGit(rootDir, "push", remoteURL, "master"); err != nil {
+	if err := execGit(rootDir, "push", remoteName, branch); err != nil {
+		if err := execGit(rootDir, "push", remoteName, "master"); err != nil {
 			return fmt.Errorf("git push 失败: %w", err)
 		}
 	}
