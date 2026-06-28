@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,9 +22,10 @@ import (
 	"github.com/borankux/dear-diary/internal/stats"
 	"github.com/borankux/dear-diary/internal/storage"
 	"github.com/borankux/dear-diary/internal/tui"
+	"github.com/borankux/dear-diary/internal/web"
 )
 
-const version = "0.4.0"
+const version = "0.5.0"
 
 const usage = `亲爱的日记 — 一个 TUI 日记应用
 
@@ -44,9 +48,18 @@ const usage = `亲爱的日记 — 一个 TUI 日记应用
                          设置生命周期状态: active, in_progress, done, wont_do, archived, other
   diary todo priority <id> <0-100|clear>
                          设置或清除优先级，数字越大越靠前
-  diary dashboard        在浏览器打开本地看板
+  diary dashboard        在浏览器打开交互式看板 (SPA)
+  diary calendar         在浏览器打开日历视图 (SPA)
+  diary serve            启动后台 Web 服务 (默认打开看板)
+  diary serve --calendar 启动并打开日历视图
+  diary serve --no-open  只启动服务，不打开浏览器
+  diary sync             将本地日记同步到远程服务器 (git push)
+  diary sync pull        从远程服务器拉取日记 (git pull)
   diary -h | --help      显示本帮助
   diary -v | --version   显示版本号
+
+  看板和日历均为交互式 Web 应用，启动后会持续在后台运行。
+  使用 Ctrl+C 或在终端中关闭来停止服务。
 
 存储:
   ~/Documents/dear-diary/YYYY-MM/YYYY-MM-DD.md
@@ -101,7 +114,16 @@ func main() {
 		must(runTodo(args[1:]))
 		return
 	case "dashboard":
-		must(process.RegenerateAndOpenDashboard())
+		must(runWebServer(args[1:], "dashboard"))
+		return
+	case "calendar":
+		must(runWebServer(args[1:], "calendar"))
+		return
+	case "serve":
+		must(runWebServer(args[1:], "dashboard"))
+		return
+	case "sync":
+		must(runSync(args[1:]))
 		return
 	}
 
@@ -445,4 +467,151 @@ func must(err error) {
 	if err != nil {
 		die(1, err.Error(), "")
 	}
+}
+
+// runSync 执行 Git 同步操作。
+// diary sync     → git add . && git commit -m "..." && git push
+// diary sync pull → git pull
+func runSync(args []string) error {
+	s := storage.New()
+	rootDir := s.RootDir()
+
+	// 检查日记目录是否是 Git 仓库
+	if _, err := os.Stat(filepath.Join(rootDir, ".git")); os.IsNotExist(err) {
+		fmt.Println("日记目录还不是 Git 仓库。正在初始化...")
+		if err := execGit(rootDir, "init"); err != nil {
+			return fmt.Errorf("git init 失败: %w", err)
+		}
+		// 添加 .gitignore 排除 process/
+		gitignore := `/process/
+/dashboard.html
+/entries/
+*.db
+`
+		if err := os.WriteFile(filepath.Join(rootDir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
+			return fmt.Errorf("创建 .gitignore 失败: %w", err)
+		}
+		fmt.Println("已初始化 Git 仓库并创建 .gitignore")
+	}
+
+	// 检查 remote
+	remoteURL := os.Getenv("DIARY_REMOTE_URL")
+	if remoteURL == "" {
+		remoteURL = "origin"
+	}
+
+	// 如果是 pull 命令
+	if len(args) > 0 && args[0] == "pull" {
+		fmt.Println("正在从远程拉取日记...")
+		if err := execGit(rootDir, "pull", remoteURL, "main"); err != nil {
+			// 尝试 master 分支
+			if err := execGit(rootDir, "pull", remoteURL, "master"); err != nil {
+				return fmt.Errorf("git pull 失败: %w", err)
+			}
+		}
+		fmt.Println("同步完成：已从远程拉取最新日记")
+		return nil
+	}
+
+	// 默认 push
+	fmt.Println("正在同步日记到远程服务器...")
+	if err := execGit(rootDir, "add", "."); err != nil {
+		return fmt.Errorf("git add 失败: %w", err)
+	}
+
+	// 检查是否有变更要提交
+	hasChanges, err := gitHasChanges(rootDir)
+	if err != nil {
+		return err
+	}
+	if !hasChanges {
+		fmt.Println("没有变更需要提交，直接推送...")
+		if err := execGit(rootDir, "push", remoteURL, "main"); err != nil {
+			if err := execGit(rootDir, "push", remoteURL, "master"); err != nil {
+				return fmt.Errorf("git push 失败: %w", err)
+			}
+		}
+		fmt.Println("同步完成")
+		return nil
+	}
+
+	commitMsg := fmt.Sprintf("sync: %s", time.Now().Format("2006-01-02 15:04:05"))
+	if err := execGit(rootDir, "commit", "-m", commitMsg); err != nil {
+		return fmt.Errorf("git commit 失败: %w", err)
+	}
+	if err := execGit(rootDir, "push", remoteURL, "main"); err != nil {
+		if err := execGit(rootDir, "push", remoteURL, "master"); err != nil {
+			return fmt.Errorf("git push 失败: %w", err)
+		}
+	}
+	fmt.Println("同步完成：已推送日记到远程服务器")
+	return nil
+}
+
+func execGit(dir string, args ...string) error {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func gitHasChanges(dir string) (bool, error) {
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("git status 失败: %w", err)
+	}
+	return len(strings.TrimSpace(string(out))) > 0, nil
+}
+
+// runWebServer 启动 HTTP 服务并打开浏览器。
+// page 可以是 "dashboard" 或 "calendar"。
+func runWebServer(args []string, page string) error {
+	addr := "0.0.0.0:8765"
+	noOpen := false
+
+	for _, a := range args {
+		switch a {
+		case "--no-open":
+			noOpen = true
+		case "--calendar":
+			page = "calendar"
+		case "--dashboard":
+			page = "dashboard"
+		case "--port":
+			// handled below
+		}
+	}
+
+	// Check if already running
+	if !noOpen {
+		resp, err := http.Get("http://" + addr + "/api/stats")
+		if err == nil && resp.StatusCode == 200 {
+			resp.Body.Close()
+			// Already running, just open browser
+			url := "http://localhost:8765/#/" + page
+			fmt.Printf("Web 服务已在运行: %s\n", url)
+			return web.OpenBrowser(url)
+		}
+	}
+
+	server := web.NewServer(addr)
+	if !noOpen {
+		go func() {
+			// Wait a moment for server to start
+			time.Sleep(600 * time.Millisecond)
+			url := "http://localhost:8765/#/" + page
+			if err := web.OpenBrowser(url); err != nil {
+				fmt.Fprintf(os.Stderr, "打开浏览器失败: %v\n", err)
+			}
+		}()
+	}
+	fmt.Println("正在启动 Dear Diary Web 服务...")
+	fmt.Printf("  看板: http://localhost:8765/#/dashboard\n")
+	fmt.Printf("  日历: http://localhost:8765/#/calendar\n")
+	fmt.Printf("  搜索: http://localhost:8765/#/search\n")
+	fmt.Println("按 Ctrl+C 停止服务")
+	return server.Start()
 }

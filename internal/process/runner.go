@@ -341,6 +341,14 @@ func (r *Runner) countNewMemories() int {
 	return c
 }
 
+// State 返回最后一次 Run 的最终状态。若尚未运行，返回 StateIdle。
+func (r *Runner) State() State {
+	if r.machine == nil {
+		return StateIdle
+	}
+	return r.machine.State()
+}
+
 func (r *Runner) printReport() {
 	fmt.Println()
 	fmt.Println("=== Dear Diary AI 提炼报告 ===")

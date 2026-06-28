@@ -162,6 +162,73 @@ func (e *Extractor) Extract(content string) (*Extracted, error) {
 	return &extracted, nil
 }
 
+// ExtractWithSystemPrompt 使用自定义 system prompt 发送内容到 LLM 并解析响应。
+func (e *Extractor) ExtractWithSystemPrompt(systemPrompt, userContent string) (*Extracted, error) {
+	payload := map[string]any{
+		"model":       e.model,
+		"temperature": 0.2,
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userContent},
+		},
+		"response_format": map[string]string{"type": "json_object"},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", e.baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+e.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := e.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("llm API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var apiResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, err
+	}
+	if apiResp.Error != nil {
+		return nil, errors.New(apiResp.Error.Message)
+	}
+	if len(apiResp.Choices) == 0 {
+		return nil, errors.New("empty choices from llm provider")
+	}
+
+	var extracted Extracted
+	if err := json.Unmarshal([]byte(apiResp.Choices[0].Message.Content), &extracted); err != nil {
+		return nil, fmt.Errorf("parse extracted json: %w\nraw: %s", err, apiResp.Choices[0].Message.Content)
+	}
+	extracted.RawJSON = apiResp.Choices[0].Message.Content
+	extracted.Normalize()
+	return &extracted, nil
+}
+
 // Normalize converts both the v0.4 items format and legacy v0.3 todos/memories
 // format into one candidate list.
 func (e *Extracted) Normalize() {

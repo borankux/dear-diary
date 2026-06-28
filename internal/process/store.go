@@ -19,8 +19,12 @@ type Store struct {
 }
 
 // NewStore opens (or creates) the SQLite database at the given path.
-// If path is empty, it defaults to ~/.local/share/dear-diary/process.db.
+// If path is empty, it first checks DIARY_DB_PATH env, then defaults to
+// ~/.local/share/dear-diary/process.db.
 func NewStore(path string) (*Store, error) {
+	if path == "" {
+		path = os.Getenv("DIARY_DB_PATH")
+	}
 	if path == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -154,7 +158,7 @@ func (s *Store) ensureSchemaCompatibility() error {
 	}
 	_, err := s.db.Exec(`
 CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
-CREATE INDEX IF NOT EXISTS idx_todos_status_priority ON todos(status, priority DESC, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_todos_status_priority ON todos(status, priority ASC, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
 `)
 	return err
@@ -320,7 +324,7 @@ func (s *Store) ListTodosByStatus(status string) ([]Todo, error) {
 		 WHERE status = ?
 		 ORDER BY
 		   CASE WHEN priority IS NULL THEN 1 ELSE 0 END,
-		   priority DESC,
+		   priority ASC,
 		   updated_at DESC,
 		   created_at DESC,
 		   id DESC`,

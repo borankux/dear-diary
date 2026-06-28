@@ -6,6 +6,14 @@
 *.so
 *.dylib
 
+# But include the embedded web dist (needed for go:embed)
+!/internal/web/dist/
+
+# Node.js
+node_modules/
+web/node_modules/
+
+
 # Test / coverage
 *.test
 *.out
