@@ -25,7 +25,7 @@ import (
 	"github.com/borankux/dear-diary/internal/web"
 )
 
-const version = "0.5.0"
+const version = "0.6.0"
 
 const usage = `亲爱的日记 — 一个 TUI 日记应用
 
@@ -55,6 +55,19 @@ const usage = `亲爱的日记 — 一个 TUI 日记应用
   diary serve --no-open  只启动服务，不打开浏览器
   diary sync             将本地日记同步到远程服务器 (git push)
   diary sync pull        从远程服务器拉取日记 (git pull)
+  diary remote setup <url> [password]  配置远程服务器并登录
+  diary remote login [password]        登录已配置的服务器
+  diary remote status                检查连接
+  diary remote stats                 显示服务器统计
+  diary remote todo                  显示服务器 todos（文本表格）
+  diary remote candidates            显示服务器候选
+  diary remote memories              显示服务器记忆
+  diary remote diary [date]          查看某天日记
+  diary remote calendar              显示日历
+  diary remote search <query>        搜索日记
+  diary remote accept <id>           接受候选
+  diary remote reject <id>           拒绝候选
+  diary remote done <id>             标记 todo 完成
   diary -h | --help      显示本帮助
   diary -v | --version   显示版本号
 
@@ -124,6 +137,9 @@ func main() {
 		return
 	case "sync":
 		must(runSync(args[1:]))
+		return
+	case "remote":
+		must(runRemote(args[1:]))
 		return
 	}
 
