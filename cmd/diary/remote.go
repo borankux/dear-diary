@@ -155,9 +155,15 @@ func runRemote(args []string) error {
 			return err
 		}
 		for _, m := range list {
-			fmt.Printf("%d-%02d\n", m.Year, m.Month)
+			fmt.Printf("%s (%s)  已写: %d 天\n", m.Month, m.Title, m.Count)
 			for _, d := range m.Days {
-				fmt.Printf("%2d ", d)
+				if d.IsPadding {
+					fmt.Printf("   ")
+				} else if d.IsWritten {
+					fmt.Printf("\033[1m%2d\033[0m ", d.Day)
+				} else {
+					fmt.Printf("%2d ", d.Day)
+				}
 			}
 			fmt.Println()
 		}

@@ -65,16 +65,21 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 			"sections": sections,
 		},
 		"candidateCount": candidateCount,
+		"candidate":      candidateCount,
 		"todoCounts": map[string]int{
-			"active":     todoCounts.Active,
+			"active":      todoCounts.Active,
 			"in_progress": todoCounts.InProgress,
-			"done":       todoCounts.Done,
-			"wont_do":    todoCounts.WontDo,
-			"archived":   todoCounts.Archived,
-			"other":      todoCounts.Other,
+			"done":        todoCounts.Done,
+			"wont_do":     todoCounts.WontDo,
+			"archived":    todoCounts.Archived,
+			"other":       todoCounts.Other,
 		},
-		"memoryCount": len(memories),
-		"diaryCount":  diaries,
+		"todo":          todoCounts.Active,
+		"memoryCount":   len(memories),
+		"memory":        len(memories),
+		"diaryCount":    diaries,
+		"diary":         diaries,
+		"processing":    "Ready",
 	})
 }
 
@@ -283,13 +288,21 @@ func handleDiaryByDate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "diary not found")
 		return
 	}
-	title, excerpt, html := summarizeDiaryForAPI(b)
-	writeJSON(w, 200, diaryListEntry{
-		Date:    dateStr,
-		Title:   title,
-		Excerpt: excerpt,
-		HTML:    html,
-		Month:   filepath.Base(filepath.Dir(path)),
+	content := string(b)
+	sections := strings.Count(content, "\n## ")
+	if strings.HasPrefix(content, "## ") {
+		sections++
+	}
+	info, _ := os.Stat(path)
+	mtime := ""
+	if info != nil {
+		mtime = info.ModTime().Format(time.RFC3339)
+	}
+	writeJSON(w, 200, map[string]any{
+		"date":     dateStr,
+		"content":  content,
+		"sections": sections,
+		"mtime":    mtime,
 	})
 }
 

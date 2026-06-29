@@ -64,10 +64,19 @@ type DiaryEntry struct {
 	Mtime    string `json:"mtime"`
 }
 
+type CalendarDay struct {
+	Day       int    `json:"day"`
+	Date      string `json:"date"`
+	IsPadding bool   `json:"isPadding"`
+	IsWritten bool   `json:"isWritten"`
+	IsToday   bool   `json:"isToday"`
+}
+
 type CalendarMonth struct {
-	Year  int   `json:"year"`
-	Month int   `json:"month"`
-	Days  []int `json:"days"`
+	Month string        `json:"month"`
+	Title string        `json:"title"`
+	Count int           `json:"count"`
+	Days  []CalendarDay `json:"days"`
 }
 
 type SearchResult struct {
