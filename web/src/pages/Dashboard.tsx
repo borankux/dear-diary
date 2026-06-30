@@ -200,7 +200,7 @@ export default function Dashboard() {
 
       <div className="dashboard-tools">
         <button onClick={handleMergeDuplicates} disabled={bulkBusy}>合并重复项</button>
-        <button className="bulk-primary" onClick={handlePromoteAll} disabled={bulkBusy || candidates.length === 0}>全部提升 AI Inbox</button>
+        {candidates.length > 0 && <button className="bulk-primary" onClick={handlePromoteAll} disabled={bulkBusy}>全部提升 AI Inbox</button>}
         {bulkMessage && <div className="bulk-message">{bulkMessage}</div>}
       </div>
 

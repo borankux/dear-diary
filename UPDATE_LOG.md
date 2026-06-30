@@ -4,6 +4,12 @@
 
 <!-- version-style: semantic -->
 
+## v0.6.7 (2026-06-30)
+
+### Patch: hide empty inbox action
+
+- AI Inbox 为 0 时隐藏 `全部提升 AI Inbox` 按钮，减少 Dashboard 主屏无效控件。
+
 ## v0.6.6 (2026-06-30)
 
 ### Patch: simplify todo board states
