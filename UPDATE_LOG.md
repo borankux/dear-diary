@@ -4,6 +4,16 @@
 
 <!-- version-style: semantic -->
 
+## v0.6.8 (2026-06-30)
+
+### Patch: polish dashboard visual hierarchy
+
+- Dashboard 顶部改为状态型 hero：直接展示今天是否写日记、AI Inbox 是否清空、长期记忆和已收起事项。
+- 主指标卡加入图标、固定视觉权重和更清晰的 6 项摘要，首屏先回答“现在要看什么”。
+- 三列主看板保留 Active / In Progress / Done，但强化列头、空状态、优先级徽标和操作按钮，减少杂乱感。
+- 导航栏改为图标 + 文案，并补齐 Dashboard 的桌面 / 移动端响应式布局。
+- 修复本地 no-auth `diary serve` 被前端登录页卡住的问题：未启用密码时 Web 应用直接进入主界面。
+
 ## v0.6.7 (2026-06-30)
 
 ### Patch: hide empty inbox action

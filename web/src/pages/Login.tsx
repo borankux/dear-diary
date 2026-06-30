@@ -40,6 +40,7 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="login-input"
+            autoComplete="current-password"
             autoFocus
           />
           {error && <div className="login-error">{error}</div>}

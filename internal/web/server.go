@@ -75,6 +75,7 @@ func (s *Server) Start() error {
 
 	// Public routes (no auth required)
 	mux.HandleFunc("/auth/login", s.authConfig.LoginHandler)
+	mux.HandleFunc("/auth/status", s.authConfig.StatusHandler)
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/api/events", s.hub.Subscribe)
 

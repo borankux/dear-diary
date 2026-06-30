@@ -1,10 +1,33 @@
-import { useEffect, useState, useRef } from 'react';
-import { getStats, getTodos, getCandidates, getDiaries, acceptCandidate, rejectCandidate, updateTodoStatus, mergeDuplicateCandidates, promoteAllCandidates, clearAuthToken, type Stats, type Todo, type Candidate, type MergeResult } from '../api';
+import { useEffect, useState, useRef, type ReactNode } from 'react';
+import {
+  Archive,
+  Ban,
+  BookOpen,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  CircleDot,
+  Clock3,
+  EyeOff,
+  GitMerge,
+  Inbox,
+  ListTodo,
+  MoreHorizontal,
+  Play,
+  RotateCcw,
+  Sparkles,
+  Sprout,
+  Upload,
+  Wifi,
+  WifiOff,
+  type LucideIcon,
+} from 'lucide-react';
+import { getStats, getTodos, getCandidates, getDiaries, acceptCandidate, rejectCandidate, updateTodoStatus, mergeDuplicateCandidates, promoteAllCandidates, type Stats, type Todo, type Candidate, type MergeResult } from '../api';
 
-const BOARD_COLUMNS = [
-  { key: 'active', title: 'Active', desc: '已经提升，尚未开始或未分类的真实 todo', color: 'board-active' },
-  { key: 'in-progress', title: 'In Progress', desc: '正在做，应该优先保持可见', color: 'board-in-progress' },
-  { key: 'done', title: 'Done', desc: '最近完成的 todo，用来看到闭环', color: 'board-done' },
+const BOARD_COLUMNS: Array<{ key: string; title: string; desc: string; color: string; icon: LucideIcon }> = [
+  { key: 'active', title: 'Active', desc: '已接收，尚未开始或未分类的事项', color: 'board-active', icon: CircleDot },
+  { key: 'in-progress', title: 'In Progress', desc: '正在做，应该优先保持可见', color: 'board-in-progress', icon: Clock3 },
+  { key: 'done', title: 'Done', desc: '最近完成的事项，用来看见闭环', color: 'board-done', icon: CheckCircle2 },
 ] as const;
 
 const INBOX_PREVIEW_LIMIT = 24;
@@ -149,58 +172,59 @@ export default function Dashboard() {
     });
   }
 
-  function handleLogout() {
-    clearAuthToken();
-    window.location.reload();
-  }
-
   const groupedTodos = BOARD_COLUMNS.reduce<Record<string, Todo[]>>((acc, col) => {
     acc[col.key] = (todos || []).filter((t) => todoBelongsToColumn(t, col.key));
     return acc;
   }, {});
   const visibleCandidates = candidates.slice(0, INBOX_PREVIEW_LIMIT);
   const hiddenCandidateCount = Math.max(candidates.length - visibleCandidates.length, 0);
+  const lastSync = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
   if (loading && !stats) return <div className="loading">加载中...</div>;
   if (error && !stats) return <div className="error">{error}</div>;
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="meta" style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', marginBottom: 8 }}>Daily Closure</div>
+      <section className="dashboard-hero">
+        <div className="hero-copy">
+          <div className="hero-eyebrow">Daily Closure</div>
           <h1>
             {stats?.today.exists
               ? '今天已写日记。'
               : '今天还没有写日记。'}
             {stats?.candidateCount === 0 ? ' AI Inbox 已清空。' : ''}
+            <Sparkles className="hero-sparkle" size={22} strokeWidth={1.8} />
           </h1>
-          <p style={{ color: 'var(--text)', margin: '8px 0 0', maxWidth: 760 }}>
+          <p>
             主看板只显示 Active / In Progress / Done；其他未分类会并入 Active。已收起 {closedTodoCount(stats)} 个：{stats?.todoCounts.archived} 个归档，{stats?.todoCounts.wont_do} 个不做。日记共 {stats?.diaryCount} 篇，长期记忆 {stats?.memoryCount} 条。
           </p>
+          <div className="hero-meta-row">
+            <span><CalendarDays size={15} />{formatHeroDate(stats?.today.date)}</span>
+            <span>长期记忆 {stats?.memoryCount ?? 0} 条</span>
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div className="hero-status">
           <div className="sse-status" title={sseConnected ? '实时连接中' : '实时连接已断开'}>
+            {sseConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
             <span className={`sse-dot ${sseConnected ? 'sse-dot--connected' : 'sse-dot--disconnected'}`} />
             <span className="sse-label">{sseConnected ? '实时连接' : '已断开'}</span>
           </div>
-          <button className="logout-button" onClick={handleLogout}>退出登录</button>
-          <div className="meta">Generated {new Date().toLocaleString('zh-CN')}</div>
+          <div className="sync-pill">最后同步 {lastSync}</div>
         </div>
-      </div>
+      </section>
 
       <div className="metric-row">
-        <div className="metric"><strong>{stats?.candidateCount}</strong><span>AI Inbox</span></div>
-        <div className="metric"><strong>{openTodoCount(stats)}</strong><span>Open todos</span></div>
-        <div className="metric"><strong>{stats?.todoCounts.in_progress}</strong><span>In progress</span></div>
-        <div className="metric"><strong>{stats?.todoCounts.done}</strong><span>Done todos</span></div>
-        <div className="metric"><strong>{closedTodoCount(stats)}</strong><span>Hidden closed</span></div>
-        <div className="metric"><strong>{stats?.diaryCount}</strong><span>Diary entries</span></div>
+        <MetricCard icon={<Inbox size={21} />} value={stats?.candidateCount ?? 0} label="AI Inbox" tone="inbox" />
+        <MetricCard icon={<ListTodo size={21} />} value={openTodoCount(stats)} label="Open todos" tone="active" />
+        <MetricCard icon={<Clock3 size={21} />} value={stats?.todoCounts.in_progress ?? 0} label="In progress" tone="progress" />
+        <MetricCard icon={<CheckCircle2 size={21} />} value={stats?.todoCounts.done ?? 0} label="Done todos" tone="done" />
+        <MetricCard icon={<EyeOff size={21} />} value={closedTodoCount(stats)} label="Hidden closed" tone="hidden" />
+        <MetricCard icon={<BookOpen size={21} />} value={stats?.diaryCount ?? 0} label="Diary entries" tone="diary" />
       </div>
 
       <div className="dashboard-tools">
-        <button onClick={handleMergeDuplicates} disabled={bulkBusy}>合并重复项</button>
-        {candidates.length > 0 && <button className="bulk-primary" onClick={handlePromoteAll} disabled={bulkBusy}>全部提升 AI Inbox</button>}
+        <button onClick={handleMergeDuplicates} disabled={bulkBusy}><GitMerge size={15} />合并重复项</button>
+        {candidates.length > 0 && <button className="bulk-primary" onClick={handlePromoteAll} disabled={bulkBusy}><Upload size={15} />全部提升 AI Inbox</button>}
         {bulkMessage && <div className="bulk-message">{bulkMessage}</div>}
       </div>
 
@@ -236,40 +260,53 @@ export default function Dashboard() {
 
       <section className="board-section">
         <div className="board-grid board-grid--primary">
-          {BOARD_COLUMNS.map((col) => (
-            <div className={`board-column ${col.color}`} key={col.key}>
-              <header>
-                <h3>{col.title}</h3>
-                <span className="board-count">{groupedTodos[col.key]?.length ?? 0}</span>
-              </header>
-              <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 10px' }}>{col.desc}。</p>
-              {(groupedTodos[col.key]?.length ?? 0) === 0 ? (
-                <div className="empty">没有 {col.title.toLowerCase()} todo。</div>
-              ) : (
-                groupedTodos[col.key].map((t) => (
-                  <div className={`board-card ${pendingTodoIds.has(t.id) ? 'is-pending' : ''}`} key={t.id}>
-                    <div className="card-meta">
-                      <span>TODO</span>
-                      <div className="card-right">
-                        {t.hasPriority && <span className="priority-badge">P{t.priority}</span>}
-                        <span className="card-id">#{t.id}</span>
+          {BOARD_COLUMNS.map((col) => {
+            const ColumnIcon = col.icon;
+            return (
+              <div className={`board-column ${col.color}`} key={col.key}>
+                <header>
+                  <h3>
+                    <span className="column-icon"><ColumnIcon size={16} strokeWidth={2.3} /></span>
+                    {col.title}
+                  </h3>
+                  <span className="board-count">{groupedTodos[col.key]?.length ?? 0}</span>
+                </header>
+                <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 10px' }}>{col.desc}。</p>
+                {(groupedTodos[col.key]?.length ?? 0) === 0 ? (
+                  <div className="empty empty-state">
+                    <Sprout size={46} strokeWidth={1.5} />
+                    <strong>{emptyColumnTitle(col.key)}</strong>
+                    <span>{col.key === 'in-progress' ? '专注当下，一件一件来。' : '这里暂时很干净。'}</span>
+                  </div>
+                ) : (
+                  groupedTodos[col.key].map((t) => (
+                    <div className={`board-card ${pendingTodoIds.has(t.id) ? 'is-pending' : ''}`} key={t.id}>
+                      <div className="card-meta">
+                        <span className={`card-status-dot card-status-dot--${todoStatusTone(t.status)}`}>
+                          {t.status === 'done' ? <CheckCircle2 size={14} /> : <CircleDot size={13} />}
+                          #{t.id}
+                        </span>
+                        <div className="card-right">
+                          {t.hasPriority && <span className="priority-badge">P{t.priority}</span>}
+                          <span className="card-menu" aria-hidden="true"><MoreHorizontal size={16} /></span>
+                        </div>
+                      </div>
+                      <strong>{t.text}</strong>
+                      {t.evidenceText && <p>{t.evidenceText}</p>}
+                      <div className="source">{t.sourceDate}</div>
+                      <div className="actions">
+                        {(t.status === 'active' || t.status === 'other') && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'in_progress')}><Play size={13} />开始</button>}
+                        {t.status === 'in_progress' && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'active')}><RotateCcw size={13} />放回</button>}
+                        {t.status !== 'done' && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'done')}><Check size={13} />完成</button>}
+                        {t.status !== 'archived' && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'archived')}><Archive size={13} />归档</button>}
+                        {t.status !== 'wont_do' && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'wont_do')}><Ban size={13} />不做</button>}
                       </div>
                     </div>
-                    <strong>{t.text}</strong>
-                    {t.evidenceText && <p>{t.evidenceText}</p>}
-                    <div className="source">{t.sourceDate}</div>
-                    <div className="actions">
-                      {(t.status === 'active' || t.status === 'other') && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'in_progress')}>开始</button>}
-                      {t.status === 'in_progress' && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'active')}>放回</button>}
-                      {t.status !== 'done' && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'done')}>完成</button>}
-                      {t.status !== 'archived' && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'archived')}>归档</button>}
-                      {t.status !== 'wont_do' && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'wont_do')}>不做</button>}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          ))}
+                  ))
+                )}
+              </div>
+            );
+          })}
         </div>
       </section>
     </div>
@@ -278,6 +315,18 @@ export default function Dashboard() {
 
 function mergeTotal(result: MergeResult) {
   return result.candidateMerged + result.todoMerged + result.memoryMerged;
+}
+
+function MetricCard({ icon, value, label, tone }: { icon: ReactNode; value: number; label: string; tone: string }) {
+  return (
+    <div className={`metric metric--${tone}`}>
+      <span className="metric-icon">{icon}</span>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+    </div>
+  );
 }
 
 function openTodoCount(stats: Stats | null) {
@@ -295,6 +344,29 @@ function todoBelongsToColumn(todo: Todo, columnKey: string) {
     return todo.status === 'active' || todo.status === 'other';
   }
   return todo.status === columnKey.replace('-', '_');
+}
+
+function todoStatusTone(status: string) {
+  if (status === 'done') return 'done';
+  if (status === 'in_progress') return 'progress';
+  return 'active';
+}
+
+function emptyColumnTitle(columnKey: string) {
+  if (columnKey === 'in-progress') return '没有进行中的事项';
+  if (columnKey === 'done') return '没有已完成事项';
+  return '没有待处理事项';
+}
+
+function formatHeroDate(date?: string) {
+  if (!date) return '今天';
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return parsed.toLocaleDateString('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+  });
 }
 
 function adjustStatsForTodoStatus(stats: Stats | null, fromStatus: string, toStatus: string): Stats | null {

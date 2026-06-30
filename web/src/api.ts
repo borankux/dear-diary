@@ -136,6 +136,10 @@ export interface SearchResult {
   lines: { lineNum: number; text: string }[];
 }
 
+export interface AuthStatus {
+  enabled: boolean;
+}
+
 export function getStats() { return apiGet<Stats>('/stats'); }
 export function getTodos() { return apiGet<Todo[]>('/todos'); }
 export function getCandidates() { return apiGet<Candidate[]>('/candidates'); }
@@ -175,6 +179,12 @@ export async function login(password: string): Promise<{ token: string }> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password }),
   });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function getAuthStatus(): Promise<AuthStatus> {
+  const res = await fetch('/auth/status');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }

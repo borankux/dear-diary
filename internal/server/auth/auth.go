@@ -76,6 +76,7 @@ func (c *Config) ValidateToken(tokenString string) (*jwt.Token, error) {
 func isPublicPath(path string) bool {
 	publicPaths := []string{
 		"/auth/login",
+		"/auth/status",
 		"/health",
 		"/",
 		"/index.html",
@@ -130,6 +131,17 @@ func (c *Config) AuthMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// StatusHandler reports whether password authentication is enabled.
+func (c *Config) StatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "请求方法不允许")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"enabled": c != nil})
 }
 
 // LoginHandler 处理登录 POST 请求，验证密码后返回 JWT Token。
