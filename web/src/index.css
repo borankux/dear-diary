@@ -139,7 +139,9 @@ body {
   box-shadow: 0 18px 48px rgba(46, 54, 49, 0.045);
 }
 .hero-copy {
-  max-width: 850px;
+  flex: 1 1 auto;
+  max-width: 1040px;
+  min-width: 0;
 }
 .hero-eyebrow {
   color: var(--muted);
