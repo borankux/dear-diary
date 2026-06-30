@@ -12,6 +12,8 @@ const BOARD_COLUMNS = [
 ] as const;
 
 const INBOX_PREVIEW_LIMIT = 24;
+type TodoCountKey = keyof Stats['todoCounts'];
+const TODO_COUNT_KEYS: TodoCountKey[] = ['active', 'in_progress', 'done', 'wont_do', 'archived', 'other'];
 
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -22,24 +24,28 @@ export default function Dashboard() {
   const [sseConnected, setSseConnected] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkMessage, setBulkMessage] = useState('');
+  const [pendingTodoIds, setPendingTodoIds] = useState<Set<number>>(new Set());
   const esRef = useRef<EventSource | null>(null);
 
-  async function loadAll() {
+  async function loadAll(options: { showLoading?: boolean } = {}) {
+    const showLoading = options.showLoading ?? false;
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       const [s, t, c] = await Promise.all([getStats(), getTodos(), getCandidates()]);
       setStats(s);
       setTodos(t);
       setCandidates(c);
       setError('');
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '加载失败');
+      if (showLoading || !stats) {
+        setError(e instanceof Error ? e.message : '加载失败');
+      }
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll({ showLoading: true }); }, []);
 
   useEffect(() => {
     const es = new EventSource('/api/events');
@@ -78,10 +84,12 @@ export default function Dashboard() {
   async function handleAccept(id: number) {
     await acceptCandidate(id);
     setCandidates((prev) => prev.filter((c) => c.id !== id));
+    void loadAll();
   }
   async function handleReject(id: number) {
     await rejectCandidate(id);
     setCandidates((prev) => prev.filter((c) => c.id !== id));
+    void loadAll();
   }
   async function handleMergeDuplicates() {
     setBulkBusy(true);
@@ -109,9 +117,40 @@ export default function Dashboard() {
     }
   }
   async function handleTodoStatus(id: number, status: string) {
-    await updateTodoStatus(id, status);
-    setTodos((prev) => prev.filter((t) => t.id !== id || (status === 'active' && t.status === 'active')));
-    loadAll();
+    const current = todos.find((t) => t.id === id);
+    if (!current || pendingTodoIds.has(id)) {
+      return;
+    }
+
+    const previousTodos = todos;
+    const previousStats = stats;
+    setTodoPending(id, true);
+    setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, status } : t)));
+    setStats((prev) => adjustStatsForTodoStatus(prev, current.status, status));
+    setBulkMessage('');
+
+    try {
+      await updateTodoStatus(id, status);
+      void loadAll();
+    } catch (e: unknown) {
+      setTodos(previousTodos);
+      setStats(previousStats);
+      setBulkMessage(e instanceof Error ? `更新失败：${e.message}` : '更新失败');
+    } finally {
+      setTodoPending(id, false);
+    }
+  }
+
+  function setTodoPending(id: number, pending: boolean) {
+    setPendingTodoIds((prev) => {
+      const next = new Set(prev);
+      if (pending) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
   }
 
   function handleLogout() {
@@ -126,8 +165,8 @@ export default function Dashboard() {
   const visibleCandidates = candidates.slice(0, INBOX_PREVIEW_LIMIT);
   const hiddenCandidateCount = Math.max(candidates.length - visibleCandidates.length, 0);
 
-  if (loading) return <div className="loading">加载中...</div>;
-  if (error) return <div className="error">{error}</div>;
+  if (loading && !stats) return <div className="loading">加载中...</div>;
+  if (error && !stats) return <div className="error">{error}</div>;
 
   return (
     <div>
@@ -217,7 +256,7 @@ export default function Dashboard() {
                 <div className="empty">没有 {col.title.toLowerCase()} todo。</div>
               ) : (
                 groupedTodos[col.key].map((t) => (
-                  <div className="board-card" key={t.id}>
+                  <div className={`board-card ${pendingTodoIds.has(t.id) ? 'is-pending' : ''}`} key={t.id}>
                     <div className="card-meta">
                       <span>TODO</span>
                       <div className="card-right">
@@ -229,9 +268,11 @@ export default function Dashboard() {
                     {t.evidenceText && <p>{t.evidenceText}</p>}
                     <div className="source">{t.sourceDate}</div>
                     <div className="actions">
-                      {t.status !== 'done' && <button onClick={() => handleTodoStatus(t.id, 'done')}>完成</button>}
-                      {t.status !== 'archived' && <button onClick={() => handleTodoStatus(t.id, 'archived')}>归档</button>}
-                      {t.status !== 'wont_do' && <button onClick={() => handleTodoStatus(t.id, 'wont_do')}>不做</button>}
+                      {(t.status === 'active' || t.status === 'other') && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'in_progress')}>开始</button>}
+                      {t.status === 'in_progress' && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'active')}>放回</button>}
+                      {t.status !== 'done' && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'done')}>完成</button>}
+                      {t.status !== 'archived' && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'archived')}>归档</button>}
+                      {t.status !== 'wont_do' && <button disabled={pendingTodoIds.has(t.id)} onClick={() => handleTodoStatus(t.id, 'wont_do')}>不做</button>}
                     </div>
                   </div>
                 ))
@@ -246,4 +287,24 @@ export default function Dashboard() {
 
 function mergeTotal(result: MergeResult) {
   return result.candidateMerged + result.todoMerged + result.memoryMerged;
+}
+
+function adjustStatsForTodoStatus(stats: Stats | null, fromStatus: string, toStatus: string): Stats | null {
+  if (!stats) return stats;
+  const from = normalizeTodoCountKey(fromStatus);
+  const to = normalizeTodoCountKey(toStatus);
+  if (from === to) return stats;
+  return {
+    ...stats,
+    todoCounts: {
+      ...stats.todoCounts,
+      [from]: Math.max(0, stats.todoCounts[from] - 1),
+      [to]: stats.todoCounts[to] + 1,
+    },
+  };
+}
+
+function normalizeTodoCountKey(status: string): TodoCountKey {
+  const key = status.replace('-', '_') as TodoCountKey;
+  return TODO_COUNT_KEYS.includes(key) ? key : 'other';
 }

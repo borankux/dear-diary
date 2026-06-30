@@ -251,6 +251,10 @@ body {
   box-shadow: 0 12px 32px rgba(23,32,29,0.10);
   transform: translateY(-1px);
 }
+.board-card.is-pending {
+  opacity: 0.62;
+  pointer-events: none;
+}
 .board-card .card-meta {
   display: flex;
   justify-content: space-between;
@@ -299,6 +303,7 @@ body {
   margin-top: 10px;
 }
 .board-card .actions button {
+  min-height: 32px;
   padding: 4px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -307,12 +312,17 @@ body {
   font-size: 0.76rem;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, opacity 0.12s, transform 0.12s;
 }
 .board-card .actions button:hover {
   background: var(--ink);
   color: #fff;
   border-color: var(--ink);
+}
+.board-card .actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
 }
 .empty {
   border: 1px dashed var(--line-strong);

@@ -4,6 +4,15 @@
 
 <!-- version-style: semantic -->
 
+## v0.6.5 (2026-06-30)
+
+### Patch: smoother todo board interactions
+
+- 修正 Dashboard Todo 状态操作后的整页闪屏：后续刷新不再把整个页面切回 loading 状态。
+- Todo 状态变更改为乐观更新：卡片先移动到目标列，后台静默刷新，失败时回滚。
+- 补齐 `In Progress` 的实际入口：Active / Other Todo 可点“开始”，In Progress Todo 可点“放回”。
+- 调整 Todo 操作按钮 pending 样式，并移除按钮上的 `transition: all`。
+
 ## v0.6.4 (2026-06-30)
 
 ### Patch: merge duplicate memory topics
