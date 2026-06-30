@@ -85,6 +85,8 @@ func (s *Server) Start() error {
 	api.HandleFunc("POST /todos/{id}/status", handleUpdateTodoStatus)
 	api.HandleFunc("POST /todos/{id}/priority", handleUpdateTodoPriority)
 	api.HandleFunc("GET /candidates", handleCandidates)
+	api.HandleFunc("POST /candidates/merge-duplicates", handleMergeDuplicateCandidates)
+	api.HandleFunc("POST /candidates/promote-all", handlePromoteAllCandidates)
 	api.HandleFunc("POST /candidates/{id}/accept", handleAcceptCandidate)
 	api.HandleFunc("POST /candidates/{id}/reject", handleRejectCandidate)
 	api.HandleFunc("GET /memories", handleMemories)

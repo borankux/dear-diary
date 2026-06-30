@@ -76,6 +76,27 @@ export interface Candidate {
   confidence: number;
 }
 
+export interface MergeResult {
+  candidateGroups: number;
+  candidateMerged: number;
+  todoGroups: number;
+  todoMerged: number;
+  memoryGroups: number;
+  memoryMerged: number;
+}
+
+export interface BulkPromotionResult {
+  ok: boolean;
+  promotedTodos: number;
+  promotedMemories: number;
+  merge: MergeResult;
+}
+
+export interface MergeDuplicatesResult {
+  ok: boolean;
+  merged: MergeResult;
+}
+
 export interface Memory {
   id: number;
   topic: string;
@@ -138,6 +159,14 @@ export function acceptCandidate(id: number) {
 
 export function rejectCandidate(id: number) {
   return apiPost<{ ok: boolean }>(`/candidates/${id}/reject`);
+}
+
+export function mergeDuplicateCandidates() {
+  return apiPost<MergeDuplicatesResult>('/candidates/merge-duplicates');
+}
+
+export function promoteAllCandidates() {
+  return apiPost<BulkPromotionResult>('/candidates/promote-all');
 }
 
 export async function login(password: string): Promise<{ token: string }> {

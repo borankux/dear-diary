@@ -228,6 +228,22 @@ type candidateAPI struct {
 	UpdatedAt    string  `json:"updatedAt"`
 }
 
+type mergeResultAPI struct {
+	CandidateGroups int `json:"candidateGroups"`
+	CandidateMerged int `json:"candidateMerged"`
+	TodoGroups      int `json:"todoGroups"`
+	TodoMerged      int `json:"todoMerged"`
+	MemoryGroups    int `json:"memoryGroups"`
+	MemoryMerged    int `json:"memoryMerged"`
+}
+
+type bulkPromotionAPI struct {
+	OK               bool           `json:"ok"`
+	PromotedTodos    int            `json:"promotedTodos"`
+	PromotedMemories int            `json:"promotedMemories"`
+	Merge            mergeResultAPI `json:"merge"`
+}
+
 func candidateToAPI(c process.Candidate) candidateAPI {
 	return candidateAPI{
 		ID:           c.ID,
@@ -242,6 +258,17 @@ func candidateToAPI(c process.Candidate) candidateAPI {
 		Confidence:   c.Confidence,
 		CreatedAt:    formatAPITime(c.CreatedAt),
 		UpdatedAt:    formatAPITime(c.UpdatedAt),
+	}
+}
+
+func mergeToAPI(result process.MergeResult) mergeResultAPI {
+	return mergeResultAPI{
+		CandidateGroups: result.CandidateGroups,
+		CandidateMerged: result.CandidateMerged,
+		TodoGroups:      result.TodoGroups,
+		TodoMerged:      result.TodoMerged,
+		MemoryGroups:    result.MemoryGroups,
+		MemoryMerged:    result.MemoryMerged,
 	}
 }
 
@@ -266,6 +293,46 @@ func handleCandidates(w http.ResponseWriter, r *http.Request) {
 		result = append(result, candidateToAPI(candidate))
 	}
 	writeJSON(w, 200, result)
+}
+
+func handleMergeDuplicateCandidates(w http.ResponseWriter, r *http.Request) {
+	store, err := process.NewStore("")
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer store.Close()
+
+	result, err := store.MergeDuplicateItems()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"ok":     true,
+		"merged": mergeToAPI(result),
+	})
+}
+
+func handlePromoteAllCandidates(w http.ResponseWriter, r *http.Request) {
+	store, err := process.NewStore("")
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer store.Close()
+
+	result, err := store.PromoteAllPendingCandidates()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, bulkPromotionAPI{
+		OK:               true,
+		PromotedTodos:    result.PromotedTodos,
+		PromotedMemories: result.PromotedMemories,
+		Merge:            mergeToAPI(result.Merge),
+	})
 }
 
 func handleAcceptCandidate(w http.ResponseWriter, r *http.Request) {

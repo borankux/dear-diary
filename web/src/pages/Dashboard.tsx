@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { getStats, getTodos, getCandidates, getDiaries, acceptCandidate, rejectCandidate, updateTodoStatus, clearAuthToken, type Stats, type Todo, type Candidate } from '../api';
+import { getStats, getTodos, getCandidates, getDiaries, acceptCandidate, rejectCandidate, updateTodoStatus, mergeDuplicateCandidates, promoteAllCandidates, clearAuthToken, type Stats, type Todo, type Candidate, type MergeResult } from '../api';
 
 const BOARD_COLUMNS = [
   { key: 'inbox', title: 'AI Inbox', desc: 'AI 提取出的建议，只在你提升后才进入可信 todo/memory', color: 'board-inbox' },
@@ -20,6 +20,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [sseConnected, setSseConnected] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState('');
   const esRef = useRef<EventSource | null>(null);
 
   async function loadAll() {
@@ -80,6 +82,31 @@ export default function Dashboard() {
   async function handleReject(id: number) {
     await rejectCandidate(id);
     setCandidates((prev) => prev.filter((c) => c.id !== id));
+  }
+  async function handleMergeDuplicates() {
+    setBulkBusy(true);
+    setBulkMessage('');
+    try {
+      const result = await mergeDuplicateCandidates();
+      setBulkMessage(`已合并 ${mergeTotal(result.merged)} 条重复项。`);
+      await loadAll();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+  async function handlePromoteAll() {
+    if (!window.confirm(`将 ${candidates.length} 条 AI Inbox 候选一次性提升为 Todo/Memory，并自动归档明显重复项。继续吗？`)) {
+      return;
+    }
+    setBulkBusy(true);
+    setBulkMessage('');
+    try {
+      const result = await promoteAllCandidates();
+      setBulkMessage(`已提升 ${result.promotedTodos} 个 Todo、${result.promotedMemories} 条 Memory；合并 ${mergeTotal(result.merge)} 条重复项。`);
+      await loadAll();
+    } finally {
+      setBulkBusy(false);
+    }
   }
   async function handleTodoStatus(id: number, status: string) {
     await updateTodoStatus(id, status);
@@ -147,6 +174,11 @@ export default function Dashboard() {
             <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 10px' }}>
               AI 提取出的建议，只在你提升后才进入可信 todo/memory。这里只展示最需要处理的前 {visibleCandidates.length} 条。
             </p>
+            <div className="column-tools">
+              <button onClick={handleMergeDuplicates} disabled={bulkBusy}>合并重复项</button>
+              <button className="bulk-primary" onClick={handlePromoteAll} disabled={bulkBusy || candidates.length === 0}>全部提升</button>
+            </div>
+            {bulkMessage && <div className="bulk-message">{bulkMessage}</div>}
             {candidates.length === 0 ? (
               <div className="empty">没有待提升候选。</div>
             ) : (
@@ -210,4 +242,8 @@ export default function Dashboard() {
       </section>
     </div>
   );
+}
+
+function mergeTotal(result: MergeResult) {
+  return result.candidateMerged + result.todoMerged + result.memoryMerged;
 }

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	_ "modernc.org/sqlite"
 )
@@ -617,6 +619,338 @@ func (s *Store) AcceptCandidate(id int) error {
 	return tx.Commit()
 }
 
+// PromoteAllPendingCandidates promotes every pending candidate, then archives
+// obvious duplicate active items created by the promotion.
+func (s *Store) PromoteAllPendingCandidates() (BulkPromotionResult, error) {
+	candidates, err := s.ListPendingCandidates()
+	if err != nil {
+		return BulkPromotionResult{}, err
+	}
+	var result BulkPromotionResult
+	for _, c := range candidates {
+		if err := s.AcceptCandidate(c.ID); err != nil {
+			return result, err
+		}
+		switch c.Type {
+		case CandidateTypeTodo:
+			result.PromotedTodos++
+		case CandidateTypeMemory:
+			result.PromotedMemories++
+		}
+	}
+	merged, err := s.MergeDuplicateItems()
+	if err != nil {
+		return result, err
+	}
+	result.Merge = merged
+	return result, nil
+}
+
+// MergeDuplicateItems collapses obvious duplicates without deleting history.
+// Pending candidate duplicates are dismissed and point at the kept candidate.
+// Active todo/memory duplicates are archived so they disappear from working views.
+func (s *Store) MergeDuplicateItems() (MergeResult, error) {
+	var result MergeResult
+
+	candidates, err := s.ListPendingCandidates()
+	if err != nil {
+		return result, err
+	}
+	candidateGroups := groupCandidatesBySignature(candidates)
+	now := time.Now().UTC()
+	for _, group := range candidateGroups {
+		keep := keepCandidate(group)
+		dupes := 0
+		for _, c := range group {
+			if c.ID == keep.ID {
+				continue
+			}
+			res, err := s.db.Exec(
+				`UPDATE ai_candidates
+				 SET status = ?, final_item_type = ?, final_item_id = ?, updated_at = ?
+				 WHERE id = ? AND status = ?`,
+				CandidateStatusRejected, "candidate", keep.ID, now, c.ID, CandidateStatusPending,
+			)
+			if err != nil {
+				return result, err
+			}
+			affected, err := res.RowsAffected()
+			if err != nil {
+				return result, err
+			}
+			if affected > 0 {
+				dupes++
+			}
+		}
+		if dupes > 0 {
+			result.CandidateGroups++
+			result.CandidateMerged += dupes
+		}
+	}
+
+	todos, err := s.listMergeableTodos()
+	if err != nil {
+		return result, err
+	}
+	todoGroups := groupTodosBySignature(todos)
+	now = time.Now().UTC()
+	for _, group := range todoGroups {
+		keep := keepTodo(group)
+		dupes := 0
+		for _, todo := range group {
+			if todo.ID == keep.ID {
+				continue
+			}
+			res, err := s.db.Exec(
+				`UPDATE todos SET status = ?, updated_at = ?
+				 WHERE id = ? AND status IN (?, ?)`,
+				TodoStatusArchived, now, todo.ID, TodoStatusActive, TodoStatusInProgress,
+			)
+			if err != nil {
+				return result, err
+			}
+			affected, err := res.RowsAffected()
+			if err != nil {
+				return result, err
+			}
+			if affected > 0 {
+				dupes++
+			}
+		}
+		if dupes > 0 {
+			result.TodoGroups++
+			result.TodoMerged += dupes
+		}
+	}
+
+	memories, err := s.ListMemories()
+	if err != nil {
+		return result, err
+	}
+	memoryGroups := groupMemoriesBySignature(memories)
+	now = time.Now().UTC()
+	for _, group := range memoryGroups {
+		keep := keepMemory(group)
+		dupes := 0
+		for _, memory := range group {
+			if memory.ID == keep.ID {
+				continue
+			}
+			res, err := s.db.Exec(
+				`UPDATE memories SET status = ?, archived_at = ?, updated_at = ?
+				 WHERE id = ? AND COALESCE(status, 'active') = 'active'`,
+				TodoStatusArchived, now, now, memory.ID,
+			)
+			if err != nil {
+				return result, err
+			}
+			affected, err := res.RowsAffected()
+			if err != nil {
+				return result, err
+			}
+			if affected > 0 {
+				dupes++
+			}
+		}
+		if dupes > 0 {
+			result.MemoryGroups++
+			result.MemoryMerged += dupes
+		}
+	}
+
+	return result, nil
+}
+
+func (s *Store) listMergeableTodos() ([]Todo, error) {
+	rows, err := s.db.Query(
+		`SELECT id, text, status, source_file, source_date, source_hash, evidence_text, created_at, updated_at, priority
+		 FROM todos
+		 WHERE status IN (?, ?)
+		 ORDER BY updated_at DESC, id ASC`,
+		TodoStatusInProgress, TodoStatusActive,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanTodos(rows)
+}
+
+func groupCandidatesBySignature(candidates []Candidate) [][]Candidate {
+	groups := make(map[string][]Candidate)
+	for _, c := range candidates {
+		key := c.Type + ":" + duplicateSignature(c.Title+" "+c.Content)
+		if key == c.Type+":" {
+			continue
+		}
+		groups[key] = append(groups[key], c)
+	}
+	return candidateDuplicateGroups(groups)
+}
+
+func candidateDuplicateGroups(groups map[string][]Candidate) [][]Candidate {
+	result := make([][]Candidate, 0)
+	for _, group := range groups {
+		if len(group) > 1 {
+			result = append(result, group)
+		}
+	}
+	return result
+}
+
+func groupTodosBySignature(todos []Todo) [][]Todo {
+	groups := make(map[string][]Todo)
+	for _, todo := range todos {
+		key := duplicateSignature(todo.Text)
+		if key == "" {
+			continue
+		}
+		groups[key] = append(groups[key], todo)
+	}
+	result := make([][]Todo, 0)
+	for _, group := range groups {
+		if len(group) > 1 {
+			result = append(result, group)
+		}
+	}
+	return result
+}
+
+func groupMemoriesBySignature(memories []Memory) [][]Memory {
+	groups := make(map[string][]Memory)
+	for _, memory := range memories {
+		key := duplicateSignature(memory.Topic + " " + memory.Summary)
+		if key == "" {
+			continue
+		}
+		groups[key] = append(groups[key], memory)
+	}
+	result := make([][]Memory, 0)
+	for _, group := range groups {
+		if len(group) > 1 {
+			result = append(result, group)
+		}
+	}
+	return result
+}
+
+func duplicateSignature(text string) string {
+	tokens := duplicateTokens(text)
+	if len(tokens) < 2 {
+		return ""
+	}
+	sort.Strings(tokens)
+	return strings.Join(tokens, "|")
+}
+
+func duplicateTokens(text string) []string {
+	text = strings.ToLower(text)
+	latinTokens := make([]string, 0)
+	var current strings.Builder
+	var cjk []rune
+	flushLatin := func() {
+		if current.Len() == 0 {
+			return
+		}
+		token := current.String()
+		current.Reset()
+		if isDuplicateStopToken(token) || len([]rune(token)) < 2 {
+			return
+		}
+		latinTokens = append(latinTokens, token)
+	}
+	for _, r := range text {
+		switch {
+		case unicode.Is(unicode.Han, r):
+			flushLatin()
+			cjk = append(cjk, r)
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			current.WriteRune(r)
+		default:
+			flushLatin()
+		}
+	}
+	flushLatin()
+
+	tokenSet := make(map[string]struct{})
+	for _, token := range latinTokens {
+		tokenSet[token] = struct{}{}
+	}
+	for i := 0; i+1 < len(cjk); i++ {
+		token := string(cjk[i : i+2])
+		if !isDuplicateStopToken(token) {
+			tokenSet[token] = struct{}{}
+		}
+	}
+	tokens := make([]string, 0, len(tokenSet))
+	for token := range tokenSet {
+		tokens = append(tokens, token)
+	}
+	return tokens
+}
+
+func isDuplicateStopToken(token string) bool {
+	switch token {
+	case "the", "and", "or", "for", "with", "from", "this", "that", "todo",
+		"一个", "一下", "这个", "那个", "需要", "进行", "完成", "处理", "继续", "相关", "关于", "以及", "可以", "应该", "目前", "今天", "明天", "后面":
+		return true
+	default:
+		return false
+	}
+}
+
+func keepCandidate(group []Candidate) Candidate {
+	best := group[0]
+	bestScore := candidateKeepScore(best)
+	for _, c := range group[1:] {
+		score := candidateKeepScore(c)
+		if score > bestScore || (score == bestScore && c.UpdatedAt.After(best.UpdatedAt)) {
+			best = c
+			bestScore = score
+		}
+	}
+	return best
+}
+
+func candidateKeepScore(c Candidate) int {
+	return len([]rune(c.Title)) + len([]rune(c.Content)) + len([]rune(c.EvidenceText))
+}
+
+func keepTodo(group []Todo) Todo {
+	best := group[0]
+	for _, todo := range group[1:] {
+		if todoRank(todo) > todoRank(best) || (todoRank(todo) == todoRank(best) && todo.UpdatedAt.After(best.UpdatedAt)) {
+			best = todo
+		}
+	}
+	return best
+}
+
+func todoRank(todo Todo) int {
+	rank := 0
+	if todo.Status == TodoStatusInProgress {
+		rank += 1000
+	}
+	if todo.HasPriority {
+		rank += todo.Priority
+	}
+	return rank
+}
+
+func keepMemory(group []Memory) Memory {
+	best := group[0]
+	bestScore := len([]rune(best.Topic)) + len([]rune(best.Summary))
+	for _, memory := range group[1:] {
+		score := len([]rune(memory.Topic)) + len([]rune(memory.Summary))
+		if score > bestScore || (score == bestScore && memory.UpdatedAt.After(best.UpdatedAt)) {
+			best = memory
+			bestScore = score
+		}
+	}
+	return best
+}
+
 // MarkTodoDone closes an active todo as completed.
 func (s *Store) MarkTodoDone(id int) error {
 	now := time.Now().UTC()
@@ -823,6 +1157,23 @@ type CandidateCounts struct {
 	Pending  int
 	Accepted int
 	Rejected int
+}
+
+// MergeResult summarizes duplicate cleanup across working tables.
+type MergeResult struct {
+	CandidateGroups int
+	CandidateMerged int
+	TodoGroups      int
+	TodoMerged      int
+	MemoryGroups    int
+	MemoryMerged    int
+}
+
+// BulkPromotionResult summarizes one-click promotion from AI Inbox.
+type BulkPromotionResult struct {
+	PromotedTodos    int
+	PromotedMemories int
+	Merge            MergeResult
 }
 
 // Candidate is an AI-proposed item waiting for human review.

@@ -311,6 +311,132 @@ func TestCandidateDedupIgnoresChangedSourceHashForSameDate(t *testing.T) {
 	}
 }
 
+func TestMergeDuplicateItems(t *testing.T) {
+	s := newTestStore(t)
+	candidates := []Candidate{
+		{
+			Type:       CandidateTypeTodo,
+			Title:      "Close dashboard loop",
+			Content:    "Close dashboard loop from AI Inbox.",
+			SourceFile: "/a/2026-06/2026-06-26.md",
+			SourceDate: "2026-06-26",
+			SourceHash: "hash-a",
+		},
+		{
+			Type:       CandidateTypeTodo,
+			Title:      "Close dashboard loop",
+			Content:    "Close dashboard loop from AI Inbox.",
+			SourceFile: "/a/2026-06/2026-06-27.md",
+			SourceDate: "2026-06-27",
+			SourceHash: "hash-b",
+		},
+	}
+	for _, c := range candidates {
+		inserted, err := s.InsertCandidateIfNew(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !inserted {
+			t.Fatal("expected candidate insert")
+		}
+	}
+	if err := s.InsertTodo("Merge duplicate dashboard task", "/a/2026-06/2026-06-26.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertTodo("Merge duplicate dashboard task", "/a/2026-06/2026-06-27.md"); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.MergeDuplicateItems()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CandidateMerged != 1 || result.TodoMerged != 1 {
+		t.Fatalf("unexpected merge result: %+v", result)
+	}
+	pending, err := s.ListPendingCandidates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending candidate after merge, got %d", len(pending))
+	}
+	todos, err := s.ListActiveTodos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(todos) != 1 {
+		t.Fatalf("expected 1 active todo after merge, got %d", len(todos))
+	}
+	archived, err := s.ListTodosByStatus(TodoStatusArchived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(archived) != 1 {
+		t.Fatalf("expected 1 archived duplicate todo, got %d", len(archived))
+	}
+}
+
+func TestPromoteAllPendingCandidates(t *testing.T) {
+	s := newTestStore(t)
+	candidates := []Candidate{
+		{
+			Type:       CandidateTypeTodo,
+			Title:      "One click promote",
+			Content:    "Promote all pending candidates.",
+			SourceFile: "/a/2026-06/2026-06-26.md",
+			SourceDate: "2026-06-26",
+			SourceHash: "hash-a",
+		},
+		{
+			Type:       CandidateTypeMemory,
+			Title:      "Inbox semantics",
+			Content:    "AI Inbox is not a mandatory review queue.",
+			SourceFile: "/a/2026-06/2026-06-26.md",
+			SourceDate: "2026-06-26",
+			SourceHash: "hash-b",
+		},
+	}
+	for _, c := range candidates {
+		inserted, err := s.InsertCandidateIfNew(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !inserted {
+			t.Fatal("expected candidate insert")
+		}
+	}
+
+	result, err := s.PromoteAllPendingCandidates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PromotedTodos != 1 || result.PromotedMemories != 1 {
+		t.Fatalf("unexpected promotion result: %+v", result)
+	}
+	pending, err := s.ListPendingCandidates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected empty inbox, got %d", len(pending))
+	}
+	todos, err := s.ListActiveTodos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(todos) != 1 {
+		t.Fatalf("expected 1 active todo, got %d", len(todos))
+	}
+	memories, err := s.ListMemories()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(memories) != 1 {
+		t.Fatalf("expected 1 active memory, got %d", len(memories))
+	}
+}
+
 func TestTodoDoneAndArchive(t *testing.T) {
 	s := newTestStore(t)
 	if err := s.InsertTodo("ship closure core", "/a/2026-06/2026-06-25.md"); err != nil {

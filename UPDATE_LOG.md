@@ -4,6 +4,16 @@
 
 <!-- version-style: semantic -->
 
+## v0.6.2 (2026-06-30)
+
+### Patch: AI Inbox bulk cleanup
+
+- 新增 Dashboard 批处理按钮：`合并重复项` 和 `全部提升`。
+- 新增 API：`POST /api/candidates/merge-duplicates` 与 `POST /api/candidates/promote-all`。
+- `全部提升` 会把 pending candidates 一次性提升为 Todo / Memory，并自动归档明显重复的 Active Todo / Memory。
+- 重复合并不删除历史：pending candidate 重复项标记为 dismissed/rejected，active Todo / Memory 重复项归档。
+- 补充 store 单元测试覆盖 candidate merge、todo duplicate archive、bulk promotion。
+
 ## v0.6.1 (2026-06-30)
 
 ### Patch: AI Inbox semantics
