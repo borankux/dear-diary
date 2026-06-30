@@ -74,12 +74,12 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 			"archived":    todoCounts.Archived,
 			"other":       todoCounts.Other,
 		},
-		"todo":          todoCounts.Active,
-		"memoryCount":   len(memories),
-		"memory":        len(memories),
-		"diaryCount":    diaries,
-		"diary":         diaries,
-		"processing":    "Ready",
+		"todo":        todoCounts.Active,
+		"memoryCount": len(memories),
+		"memory":      len(memories),
+		"diaryCount":  diaries,
+		"diary":       diaries,
+		"processing":  "Ready",
 	})
 }
 
@@ -96,6 +96,39 @@ func countDiaries(s *storage.Storage) int {
 
 // ---------- Todos ----------
 
+type todoAPI struct {
+	ID           int    `json:"id"`
+	Text         string `json:"text"`
+	Status       string `json:"status"`
+	Priority     *int   `json:"priority,omitempty"`
+	HasPriority  bool   `json:"hasPriority"`
+	SourceFile   string `json:"sourceFile"`
+	SourceDate   string `json:"sourceDate"`
+	EvidenceText string `json:"evidenceText"`
+	CreatedAt    string `json:"createdAt"`
+	UpdatedAt    string `json:"updatedAt"`
+}
+
+func todoToAPI(t process.Todo) todoAPI {
+	var priority *int
+	if t.HasPriority {
+		p := t.Priority
+		priority = &p
+	}
+	return todoAPI{
+		ID:           t.ID,
+		Text:         t.Text,
+		Status:       t.Status,
+		Priority:     priority,
+		HasPriority:  t.HasPriority,
+		SourceFile:   t.SourceFile,
+		SourceDate:   t.SourceDate,
+		EvidenceText: t.EvidenceText,
+		CreatedAt:    formatAPITime(t.CreatedAt),
+		UpdatedAt:    formatAPITime(t.UpdatedAt),
+	}
+}
+
 func handleTodos(w http.ResponseWriter, r *http.Request) {
 	store, err := process.NewStore("")
 	if err != nil {
@@ -105,14 +138,16 @@ func handleTodos(w http.ResponseWriter, r *http.Request) {
 	defer store.Close()
 
 	// Return all todos across all statuses
-	allTodos := make([]process.Todo, 0)
+	allTodos := make([]todoAPI, 0)
 	for _, status := range []string{process.TodoStatusActive, process.TodoStatusInProgress, process.TodoStatusDone, process.TodoStatusWontDo, process.TodoStatusArchived, process.TodoStatusOther} {
 		todos, err := store.ListTodosByStatus(status)
 		if err != nil {
 			writeError(w, 500, err.Error())
 			return
 		}
-		allTodos = append(allTodos, todos...)
+		for _, todo := range todos {
+			allTodos = append(allTodos, todoToAPI(todo))
+		}
 	}
 	writeJSON(w, 200, allTodos)
 }
@@ -124,7 +159,9 @@ func handleUpdateTodoStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid id")
 		return
 	}
-	var body struct{ Status string `json:"status"` }
+	var body struct {
+		Status string `json:"status"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, 400, "invalid body")
 		return
@@ -144,7 +181,68 @@ func handleUpdateTodoStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+func handleUpdateTodoPriority(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeError(w, 400, "invalid id")
+		return
+	}
+	var body struct {
+		Priority *int `json:"priority"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, 400, "invalid body")
+		return
+	}
+
+	store, err := process.NewStore("")
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer store.Close()
+
+	if err := store.SetTodoPriority(id, body.Priority); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 // ---------- Candidates ----------
+
+type candidateAPI struct {
+	ID           int     `json:"id"`
+	Type         string  `json:"type"`
+	Title        string  `json:"title"`
+	Content      string  `json:"content"`
+	Summary      string  `json:"summary"`
+	Status       string  `json:"status"`
+	SourceFile   string  `json:"sourceFile"`
+	SourceDate   string  `json:"sourceDate"`
+	EvidenceText string  `json:"evidenceText"`
+	Confidence   float64 `json:"confidence"`
+	CreatedAt    string  `json:"createdAt"`
+	UpdatedAt    string  `json:"updatedAt"`
+}
+
+func candidateToAPI(c process.Candidate) candidateAPI {
+	return candidateAPI{
+		ID:           c.ID,
+		Type:         c.Type,
+		Title:        c.Title,
+		Content:      c.Content,
+		Summary:      c.Content,
+		Status:       c.Status,
+		SourceFile:   c.SourceFile,
+		SourceDate:   c.SourceDate,
+		EvidenceText: c.EvidenceText,
+		Confidence:   c.Confidence,
+		CreatedAt:    formatAPITime(c.CreatedAt),
+		UpdatedAt:    formatAPITime(c.UpdatedAt),
+	}
+}
 
 func handleCandidates(w http.ResponseWriter, r *http.Request) {
 	store, err := process.NewStore("")
@@ -162,7 +260,11 @@ func handleCandidates(w http.ResponseWriter, r *http.Request) {
 	if candidates == nil {
 		candidates = []process.Candidate{}
 	}
-	writeJSON(w, 200, candidates)
+	result := make([]candidateAPI, 0, len(candidates))
+	for _, candidate := range candidates {
+		result = append(result, candidateToAPI(candidate))
+	}
+	writeJSON(w, 200, result)
 }
 
 func handleAcceptCandidate(w http.ResponseWriter, r *http.Request) {
@@ -207,6 +309,32 @@ func handleRejectCandidate(w http.ResponseWriter, r *http.Request) {
 
 // ---------- Memories ----------
 
+type memoryAPI struct {
+	ID           int    `json:"id"`
+	Topic        string `json:"topic"`
+	Summary      string `json:"summary"`
+	Status       string `json:"status"`
+	SourceFile   string `json:"sourceFile"`
+	SourceDate   string `json:"sourceDate"`
+	EvidenceText string `json:"evidenceText"`
+	CreatedAt    string `json:"createdAt"`
+	UpdatedAt    string `json:"updatedAt"`
+}
+
+func memoryToAPI(m process.Memory) memoryAPI {
+	return memoryAPI{
+		ID:           m.ID,
+		Topic:        m.Topic,
+		Summary:      m.Summary,
+		Status:       m.Status,
+		SourceFile:   m.SourceFile,
+		SourceDate:   m.SourceDate,
+		EvidenceText: m.EvidenceText,
+		CreatedAt:    formatAPITime(m.CreatedAt),
+		UpdatedAt:    formatAPITime(m.UpdatedAt),
+	}
+}
+
 func handleMemories(w http.ResponseWriter, r *http.Request) {
 	store, err := process.NewStore("")
 	if err != nil {
@@ -223,7 +351,18 @@ func handleMemories(w http.ResponseWriter, r *http.Request) {
 	if memories == nil {
 		memories = []process.Memory{}
 	}
-	writeJSON(w, 200, memories)
+	result := make([]memoryAPI, 0, len(memories))
+	for _, memory := range memories {
+		result = append(result, memoryToAPI(memory))
+	}
+	writeJSON(w, 200, result)
+}
+
+func formatAPITime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339)
 }
 
 // ---------- Diaries ----------
@@ -520,6 +659,6 @@ func handleDiaryCreate(w http.ResponseWriter, r *http.Request) {
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{
 		"status":  "ok",
-		"version": "0.5.0-server",
+		"version": "0.6.0-server",
 	})
 }

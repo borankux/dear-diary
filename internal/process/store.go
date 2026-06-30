@@ -324,7 +324,7 @@ func (s *Store) ListTodosByStatus(status string) ([]Todo, error) {
 		 WHERE status = ?
 		 ORDER BY
 		   CASE WHEN priority IS NULL THEN 1 ELSE 0 END,
-		   priority ASC,
+		   priority DESC,
 		   updated_at DESC,
 		   created_at DESC,
 		   id DESC`,

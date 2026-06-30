@@ -79,9 +79,15 @@ type CalendarMonth struct {
 	Days  []CalendarDay `json:"days"`
 }
 
+type SearchLine struct {
+	LineNum int    `json:"lineNum"`
+	Text    string `json:"text"`
+}
+
 type SearchResult struct {
-	Date  string   `json:"date"`
-	Lines []string `json:"lines"`
+	Date  string       `json:"date"`
+	Title string       `json:"title"`
+	Lines []SearchLine `json:"lines"`
 }
 
 // ── Construction & Config ─────────────────────────────────────────────
@@ -161,7 +167,9 @@ func (c *Client) Login(password string) error {
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("login failed: %s", res.Status)
 	}
-	var result struct{ Token string `json:"token"` }
+	var result struct {
+		Token string `json:"token"`
+	}
 	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
 		return fmt.Errorf("decode login response: %w", err)
 	}

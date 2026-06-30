@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -21,9 +22,9 @@ func runRemote(args []string) error {
 			return fmt.Errorf("用法: diary remote setup <url> [password]")
 		}
 		url := args[1]
-		password := "dear-diary-2026"
-		if len(args) >= 3 {
-			password = args[2]
+		password, err := remotePassword(args[2:])
+		if err != nil {
+			return err
 		}
 		c.SetConfig(url, "")
 		if err := c.Login(password); err != nil {
@@ -36,9 +37,9 @@ func runRemote(args []string) error {
 		return nil
 
 	case "login":
-		password := "dear-diary-2026"
-		if len(args) >= 2 {
-			password = args[1]
+		password, err := remotePassword(args[1:])
+		if err != nil {
+			return err
 		}
 		if c.Config().BaseURL == "" {
 			return fmt.Errorf("未配置远程服务器，请先用 diary remote setup <url>")
@@ -188,7 +189,7 @@ func runRemote(args []string) error {
 		for _, r := range results {
 			fmt.Printf("\n%s\n", r.Date)
 			for _, line := range r.Lines {
-				fmt.Printf("  %s\n", line)
+				fmt.Printf("  %d: %s\n", line.LineNum, line.Text)
 			}
 		}
 		return nil
@@ -247,6 +248,16 @@ func runRemote(args []string) error {
 	default:
 		return fmt.Errorf("未知子命令: %s", args[0])
 	}
+}
+
+func remotePassword(args []string) (string, error) {
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		return args[0], nil
+	}
+	if password := strings.TrimSpace(os.Getenv("DIARY_REMOTE_PASSWORD")); password != "" {
+		return password, nil
+	}
+	return "", fmt.Errorf("缺少远程密码：传入 password 参数，或设置 DIARY_REMOTE_PASSWORD")
 }
 
 // ── Table helpers ────────────────────────────────────────────────────

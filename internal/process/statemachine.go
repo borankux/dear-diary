@@ -22,7 +22,7 @@ type Event string
 type Severity string
 
 const (
-	SeverityTransient   Severity = "transient"
+	SeverityTransient     Severity = "transient"
 	SeverityUnrecoverable Severity = "unrecoverable"
 )
 
@@ -46,26 +46,26 @@ const (
 
 // Process-level events.
 const (
-	EventStartProcess          Event = "StartProcess"
-	EventIdempotencyHit        Event = "IdempotencyHit"
-	EventNoChanges             Event = "NoChanges"
-	EventChangesFound          Event = "ChangesFound"
-	EventContentLoaded         Event = "ContentLoaded"
-	EventIOError               Event = "IOError"
-	EventExtractionOK          Event = "ExtractionOK"
-	EventTransientAIError      Event = "TransientAIError"
-	EventUnrecoverableAIError  Event = "UnrecoverableAIError"
-	EventRetry                 Event = "Retry"
-	EventMaxRetriesExceeded    Event = "MaxRetriesExceeded"
-	EventDuplicatesResolved    Event = "DuplicatesResolved"
-	EventConflictUnresolvable  Event = "ConflictUnresolvable"
-	EventMergeComplete         Event = "MergeComplete"
+	EventStartProcess           Event = "StartProcess"
+	EventIdempotencyHit         Event = "IdempotencyHit"
+	EventNoChanges              Event = "NoChanges"
+	EventChangesFound           Event = "ChangesFound"
+	EventContentLoaded          Event = "ContentLoaded"
+	EventIOError                Event = "IOError"
+	EventExtractionOK           Event = "ExtractionOK"
+	EventTransientAIError       Event = "TransientAIError"
+	EventUnrecoverableAIError   Event = "UnrecoverableAIError"
+	EventRetry                  Event = "Retry"
+	EventMaxRetriesExceeded     Event = "MaxRetriesExceeded"
+	EventDuplicatesResolved     Event = "DuplicatesResolved"
+	EventConflictUnresolvable   Event = "ConflictUnresolvable"
+	EventMergeComplete          Event = "MergeComplete"
 	EventMergeInvariantViolated Event = "MergeInvariantViolated"
-	EventPersistOK             Event = "PersistOK"
-	EventDBError               Event = "DBError"
-	EventSummaryOK             Event = "SummaryOK"
-	EventMDWriteError          Event = "MDWriteError"
-	EventReportEmitted         Event = "ReportEmitted"
+	EventPersistOK              Event = "PersistOK"
+	EventDBError                Event = "DBError"
+	EventSummaryOK              Event = "SummaryOK"
+	EventMDWriteError           Event = "MDWriteError"
+	EventReportEmitted          Event = "ReportEmitted"
 )
 
 var (
@@ -212,9 +212,9 @@ func (m *Machine) Log() []TransitionLog {
 
 // Transition attempts to move the machine to the next state for the given event.
 // It enforces:
-//   1. terminal-state guard
-//   2. allow-list transition table
-//   3. retry-count ceiling when leaving RetryPending
+//  1. terminal-state guard
+//  2. allow-list transition table
+//  3. retry-count ceiling when leaving RetryPending
 func (m *Machine) Transition(event Event, reason string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

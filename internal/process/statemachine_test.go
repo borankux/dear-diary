@@ -176,9 +176,9 @@ func TestInvalidTransitionsRejected(t *testing.T) {
 
 func TestTerminalStatesBlockTransitions(t *testing.T) {
 	terminals := []struct {
-		name   string
-		reach  func(*Machine) error
-		state  State
+		name  string
+		reach func(*Machine) error
+		state State
 	}{
 		{
 			name: "NoChanges",

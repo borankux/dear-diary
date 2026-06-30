@@ -2,7 +2,7 @@
 
 > 部署服务器: `47.83.215.224` (阿里云香港)  
 > 域名: `https://diary.wakitsoft.com`  
-> 版本: v0.5.0-server
+> 版本: v0.6.0-server
 
 ---
 
@@ -13,7 +13,7 @@
 | 线上 | `https://diary.wakitsoft.com` | ✅ HTTPS + 登录 |
 | 健康检查 | `https://diary.wakitsoft.com/health` | ✅ |
 
-**登录密码**: `dear-diary-2026`
+**登录密码**: 只保存在服务器 `/opt/dear-diary/.env`，不要写入仓库文档。
 
 ---
 
@@ -134,13 +134,13 @@ journalctl -u dear-diary --no-pager -n 50
 配置文件: `/opt/dear-diary/.env`
 
 ```bash
-DIARY_PASSWORD=dear-diary-2026          # 登录密码
+DIARY_PASSWORD=<server-login-password>  # 登录密码
 DIARY_DATA_DIR=/var/lib/dear-diary      # 日记根目录
 DIARY_DB_PATH=/var/lib/dear-diary/process.db
 DIARY_PORT=0.0.0.0:8765
 DIARY_AUTO_PROCESS=true
 DIARY_WATCH_INTERVAL=30s
-DIARY_LLM_API_KEY=sk-ca84ded107314011be6936b7db78c81a
+DIARY_LLM_API_KEY=<llm-api-key>
 DIARY_LLM_BASE_URL=https://api.deepseek.com
 DIARY_LLM_MODEL=deepseek-chat
 ```
@@ -236,7 +236,7 @@ server {
 # 登录
 curl -X POST https://diary.wakitsoft.com/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"password":"dear-diary-2026"}'
+  -d '{"password":"<server-login-password>"}'
 
 # 获取数据（使用返回的 token）
 curl -H "Authorization: Bearer <token>" \
@@ -309,8 +309,9 @@ systemctl restart dear-diary
 - 服务器到期日: **2026-07-20**（需续费）
 - 域名到期日: **2027-01-23**
 - SSL 到期日: **2026-09-26**（自动续期）
-- 密码 `dear-diary-2026` 建议定期更换
-- API Key 仅存储在服务器环境变量，不提交到 Git
+- 登录密码建议定期更换。
+- LLM API key 仅存储在服务器环境变量，不提交到 Git。
+- 如果真实 key 曾经进入提交历史，立即在 provider 侧轮换。
 
 ---
 

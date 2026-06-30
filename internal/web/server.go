@@ -83,14 +83,17 @@ func (s *Server) Start() error {
 	api.HandleFunc("GET /stats", handleStats)
 	api.HandleFunc("GET /todos", handleTodos)
 	api.HandleFunc("POST /todos/{id}/status", handleUpdateTodoStatus)
+	api.HandleFunc("POST /todos/{id}/priority", handleUpdateTodoPriority)
 	api.HandleFunc("GET /candidates", handleCandidates)
 	api.HandleFunc("POST /candidates/{id}/accept", handleAcceptCandidate)
 	api.HandleFunc("POST /candidates/{id}/reject", handleRejectCandidate)
 	api.HandleFunc("GET /memories", handleMemories)
 	api.HandleFunc("GET /diaries", handleDiaries)
+	api.HandleFunc("POST /diaries", handleDiaryCreate)
 	api.HandleFunc("GET /diaries/{date}", handleDiaryByDate)
 	api.HandleFunc("GET /calendar", handleCalendar)
 	api.HandleFunc("GET /search", handleSearch)
+	api.HandleFunc("GET /sync", handleSync)
 
 	// Wrap API with auth middleware
 	authWrapped := s.authConfig.AuthMiddleware(api)

@@ -21,16 +21,16 @@ type Notifier interface {
 // Watcher 使用 fsnotify 监听日记文件系统变化。
 // 它会对同一文件的变化进行 3 秒防抖，并首次启动时执行一次全量扫描。
 type Watcher struct {
-	dataDir    string
-	notifier   Notifier
-	fsWatcher  *fsnotify.Watcher
-	Events     chan string // 防抖后对外暴露的事件通道
-	rawEvents  chan string // 内部原始事件通道
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	mu         sync.RWMutex
-	running    bool
+	dataDir   string
+	notifier  Notifier
+	fsWatcher *fsnotify.Watcher
+	Events    chan string // 防抖后对外暴露的事件通道
+	rawEvents chan string // 内部原始事件通道
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	mu        sync.RWMutex
+	running   bool
 }
 
 // New 创建一个新的 Watcher。
