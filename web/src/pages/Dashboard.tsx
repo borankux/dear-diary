@@ -2,14 +2,16 @@ import { useEffect, useState, useRef } from 'react';
 import { getStats, getTodos, getCandidates, getDiaries, acceptCandidate, rejectCandidate, updateTodoStatus, clearAuthToken, type Stats, type Todo, type Candidate } from '../api';
 
 const BOARD_COLUMNS = [
-  { key: 'inbox', title: 'Inbox', desc: 'AI 候选，还没有进入可信 todo/memory', color: 'board-inbox' },
-  { key: 'active', title: 'Active', desc: '已经接受，尚未开始或未分类的真实 todo', color: 'board-active' },
+  { key: 'inbox', title: 'AI Inbox', desc: 'AI 提取出的建议，只在你提升后才进入可信 todo/memory', color: 'board-inbox' },
+  { key: 'active', title: 'Active', desc: '已经提升，尚未开始或未分类的真实 todo', color: 'board-active' },
   { key: 'in-progress', title: 'In Progress', desc: '正在做，应该优先保持可见', color: 'board-in-progress' },
   { key: 'done', title: 'Done', desc: '最近完成的 todo，用来看到闭环', color: 'board-done' },
   { key: 'wont-do', title: "Won't Do", desc: '明确不打算做，避免继续占注意力', color: 'board-wont-do' },
   { key: 'archived', title: 'Archived', desc: '已收起但不算完成的 todo', color: 'board-archived' },
   { key: 'other', title: 'Other', desc: 'AI 或人工暂时无法归类的 todo', color: 'board-other' },
 ] as const;
+
+const INBOX_PREVIEW_LIMIT = 24;
 
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -94,6 +96,8 @@ export default function Dashboard() {
     acc[col.key] = (todos || []).filter((t) => t.status === col.key.replace('-', '_'));
     return acc;
   }, {});
+  const visibleCandidates = candidates.slice(0, INBOX_PREVIEW_LIMIT);
+  const hiddenCandidateCount = Math.max(candidates.length - visibleCandidates.length, 0);
 
   if (loading) return <div className="loading">加载中...</div>;
   if (error) return <div className="error">{error}</div>;
@@ -107,7 +111,7 @@ export default function Dashboard() {
             {stats?.today.exists
               ? '今天已写日记。'
               : '今天还没有写日记。'}
-            {stats?.candidateCount === 0 ? ' Inbox 已清空。' : ''}
+            {stats?.candidateCount === 0 ? ' AI Inbox 已清空。' : ''}
           </h1>
           <p style={{ color: 'var(--text)', margin: '8px 0 0', maxWidth: 760 }}>
             {stats?.todoCounts.active} 个 active，{stats?.todoCounts.in_progress} 个正在做，{stats?.todoCounts.done} 个已完成，{stats?.todoCounts.wont_do} 个不打算做，{stats?.todoCounts.archived} 个已归档。日记共 {stats?.diaryCount} 篇，长期记忆 {stats?.memoryCount} 条。
@@ -124,7 +128,7 @@ export default function Dashboard() {
       </div>
 
       <div className="metric-row">
-        <div className="metric"><strong>{stats?.candidateCount}</strong><span>Inbox candidates</span></div>
+        <div className="metric"><strong>{stats?.candidateCount}</strong><span>AI Inbox</span></div>
         <div className="metric"><strong>{stats?.todoCounts.active}</strong><span>Active todos</span></div>
         <div className="metric"><strong>{stats?.todoCounts.in_progress}</strong><span>In progress</span></div>
         <div className="metric"><strong>{stats?.todoCounts.done}</strong><span>Done todos</span></div>
@@ -137,28 +141,35 @@ export default function Dashboard() {
           {/* Inbox column: candidates */}
           <div className="board-column board-inbox">
             <header>
-              <h3>Inbox</h3>
+              <h3>AI Inbox</h3>
               <span className="board-count">{candidates.length}</span>
             </header>
-            <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 10px' }}>AI 候选，还没有进入可信 todo/memory。</p>
+            <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 10px' }}>
+              AI 提取出的建议，只在你提升后才进入可信 todo/memory。这里只展示最需要处理的前 {visibleCandidates.length} 条。
+            </p>
             {candidates.length === 0 ? (
-              <div className="empty">没有待确认候选。</div>
+              <div className="empty">没有待提升候选。</div>
             ) : (
-              candidates.map((c) => (
-                <div className="board-card" key={c.id}>
-                  <div className="card-meta">
-                    <span>{c.type.toUpperCase()}</span>
-                    <span className="card-id">#{c.id}</span>
+              <>
+                {visibleCandidates.map((c) => (
+                  <div className="board-card" key={c.id}>
+                    <div className="card-meta">
+                      <span>{c.type.toUpperCase()}</span>
+                      <span className="card-id">#{c.id}</span>
+                    </div>
+                    <strong>{c.title || c.content.slice(0, 60)}</strong>
+                    {c.evidenceText && <p>{c.evidenceText}</p>}
+                    <div className="source">{c.sourceDate}</div>
+                    <div className="actions">
+                      <button onClick={() => handleAccept(c.id)}>提升</button>
+                      <button onClick={() => handleReject(c.id)}>丢弃</button>
+                    </div>
                   </div>
-                  <strong>{c.title || c.content.slice(0, 60)}</strong>
-                  {c.evidenceText && <p>{c.evidenceText}</p>}
-                  <div className="source">{c.sourceDate}</div>
-                  <div className="actions">
-                    <button onClick={() => handleAccept(c.id)}>接受</button>
-                    <button onClick={() => handleReject(c.id)}>拒绝</button>
-                  </div>
-                </div>
-              ))
+                ))}
+                {hiddenCandidateCount > 0 && (
+                  <div className="empty">还有 {hiddenCandidateCount} 条保留在后台，不需要一次性处理完。</div>
+                )}
+              </>
             )}
           </div>
 

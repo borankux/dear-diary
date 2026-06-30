@@ -3,20 +3,20 @@
 > 每条任务必须包含：负责人 / 截止时间 / 依赖项
 > 完成的任务勾选保留（不删除），作为执行历史
 
-## 当前重点：v0.4 Closure Core 真实使用验证
+## 当前重点：v0.6 AI Inbox 真实使用验证
 - [ ] 用真实日记连续跑 `diary process`，评估 pending candidates 质量
   Owner: Frank | Deadline: 待定 | Dependencies: v0.4.0
-- [ ] 用 `diary review` 接受/拒绝至少一轮候选，记录 review 是否过慢
+- [ ] 用 `diary inbox` 看摘要，再用 `diary inbox triage` 提升/丢弃至少一轮候选，记录 triage 是否过慢
   Owner: Frank | Deadline: 待定 | Dependencies: pending candidates
 - [ ] 用 `diary todo done/archive` 关闭一批 active todos，验证 Todo 闭环是否足够
-  Owner: Frank | Deadline: 待定 | Dependencies: accepted todos
+  Owner: Frank | Deadline: 待定 | Dependencies: promoted todos
 - [ ] 观察 dashboard 是否能清楚暴露 pending candidates / active todos / recent memories
   Owner: Frank | Deadline: 待定 | Dependencies: v0.4.0 dashboard
 
-## v0.4.1 候选（只有真实使用证明需要时再做）
-- [ ] `diary review edit`：接受前编辑 candidate 内容
-  Owner: Frank | Deadline: 待定 | Dependencies: review 真实使用反馈
-- [ ] `diary review merge`：把 candidate 合并到已有 Todo / Memory
+## 后续候选（只有真实使用证明需要时再做）
+- [ ] `diary inbox edit`：提升前编辑 candidate 内容
+  Owner: Frank | Deadline: 待定 | Dependencies: inbox triage 真实使用反馈
+- [ ] `diary inbox merge`：把 candidate 合并到已有 Todo / Memory
   Owner: Frank | Deadline: 待定 | Dependencies: 出现明显重复 memory/todo
 - [ ] `diary memory`：只读查看 recent memories
   Owner: Frank | Deadline: 待定 | Dependencies: Memory 使用量增长
@@ -44,5 +44,7 @@
   Owner: Codex | Deadline: 2026-06-26 | Dependencies: v0.3.0
 - [x] Dashboard read-only readability pass（今日概览 + Web 月历入口 + 单日日记页 + 注意力队列）
   Owner: Codex | Deadline: 2026-06-26 | Dependencies: v0.4.0 dashboard
+- [x] v0.6.1 AI Inbox 语义修正（summary first + triage promote/dismiss + review compatibility）
+  Owner: Codex | Deadline: 2026-06-30 | Dependencies: v0.6.0 remote dashboard
 - [x] 项目管理系统初始化（CLAUDE.md / PROJECT.md / STRUCTURE.md 等）
   Owner: Claude + Frank | Deadline: 2026-06-25 | Dependencies: 无

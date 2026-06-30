@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,7 +26,7 @@ import (
 	"github.com/borankux/dear-diary/internal/web"
 )
 
-const version = "0.6.0"
+const version = "0.6.1"
 
 const usage = `亲爱的日记 — 一个 TUI 日记应用
 
@@ -39,8 +40,10 @@ const usage = `亲爱的日记 — 一个 TUI 日记应用
                             06-24         月-日 (默认今年)
                             6/24          月/日 (默认今年)
   diary search <keyword> 搜索所有日记内容 (匹配的行倒序列出)
-  diary process          用配置的 LLM 提炼最近日记为待确认候选项
-  diary review           人工确认 / 拒绝 AI 候选项
+  diary process          用配置的 LLM 提炼最近日记到 AI Inbox
+  diary inbox            查看 AI Inbox 概览（默认不逐条处理）
+  diary inbox triage     逐条提升 / 丢弃 AI 候选
+  diary review           兼容旧命令，等同 diary inbox triage
   diary todo             查看 active todos
   diary todo done <id>   标记 todo 完成
   diary todo archive <id> 归档 todo
@@ -65,8 +68,10 @@ const usage = `亲爱的日记 — 一个 TUI 日记应用
   diary remote diary [date]          查看某天日记
   diary remote calendar              显示日历
   diary remote search <query>        搜索日记
-  diary remote accept <id>           接受候选
-  diary remote reject <id>           拒绝候选
+  diary remote promote <id>          将远程候选提升为 todo/memory
+  diary remote dismiss <id>          丢弃远程候选
+  diary remote accept <id>           兼容旧命令，等同 promote
+  diary remote reject <id>           兼容旧命令，等同 dismiss
   diary remote done <id>             标记 todo 完成
   diary -h | --help      显示本帮助
   diary -v | --version   显示版本号
@@ -79,7 +84,7 @@ const usage = `亲爱的日记 — 一个 TUI 日记应用
   例: ~/Documents/dear-diary/2026-06/2026-06-25.md
 
 隐私:
-  diary / browse / search / dashboard / todo / review 只读取本地文件和 SQLite
+  diary / browse / search / dashboard / todo / inbox / review 只读取本地文件和 SQLite
   diary process 会把待处理日记内容发送给配置的 LLM Provider
 
 编辑器:
@@ -120,8 +125,11 @@ func main() {
 	case "process":
 		must(runProcess())
 		return
+	case "inbox":
+		must(runInbox(args[1:]))
+		return
 	case "review":
-		must(runReview())
+		must(runInboxTriage())
 		return
 	case "todo":
 		must(runTodo(args[1:]))
@@ -224,7 +232,29 @@ func runProcess() error {
 	return runner.Run()
 }
 
-func runReview() error {
+func runInbox(args []string) error {
+	if len(args) == 0 || args[0] == "summary" || args[0] == "list" {
+		if len(args) > 1 {
+			return errors.New(inboxUsage())
+		}
+		return runInboxSummary()
+	}
+	if len(args) > 1 {
+		return errors.New(inboxUsage())
+	}
+	switch args[0] {
+	case "triage", "review":
+		return runInboxTriage()
+	default:
+		return errors.New(inboxUsage())
+	}
+}
+
+func inboxUsage() string {
+	return "用法: diary inbox [summary] | diary inbox triage"
+}
+
+func runInboxSummary() error {
 	store, err := process.NewStore("")
 	if err != nil {
 		return err
@@ -239,9 +269,108 @@ func runReview() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("AI candidates: %d pending · %d accepted · %d rejected\n", counts.Pending, counts.Accepted, counts.Rejected)
+
+	fmt.Printf("AI Inbox: %d pending · %d promoted · %d dismissed\n", counts.Pending, counts.Accepted, counts.Rejected)
 	if len(candidates) == 0 {
-		fmt.Println("没有待确认的 AI 候选项。")
+		fmt.Println("AI Inbox 已清空。")
+		return nil
+	}
+
+	fmt.Println("Type:", formatCandidateCounts(countCandidatesByType(candidates)))
+	fmt.Println("Source:", formatCandidateCounts(countCandidatesBySource(candidates)))
+
+	limit := min(len(candidates), 8)
+	fmt.Printf("\nNext items (showing %d of %d):\n", limit, len(candidates))
+	for i := 0; i < limit; i++ {
+		c := candidates[i]
+		source := candidateSource(c)
+		if source != "" {
+			source = " · " + source
+		}
+		fmt.Printf("  #%d [%s] %s%s\n", c.ID, c.Type, candidateTitle(c), source)
+	}
+	if len(candidates) > limit {
+		fmt.Printf("  ... 还有 %d 条保留在后台，不需要一次性处理完。\n", len(candidates)-limit)
+	}
+	fmt.Println("\n需要处理时运行: diary inbox triage")
+	return nil
+}
+
+func countCandidatesByType(candidates []process.Candidate) map[string]int {
+	counts := make(map[string]int)
+	for _, c := range candidates {
+		key := c.Type
+		if key == "" {
+			key = "unknown"
+		}
+		counts[key]++
+	}
+	return counts
+}
+
+func countCandidatesBySource(candidates []process.Candidate) map[string]int {
+	counts := make(map[string]int)
+	for _, c := range candidates {
+		source := candidateSource(c)
+		if source == "" {
+			source = "unknown"
+		}
+		counts[source]++
+	}
+	return counts
+}
+
+func formatCandidateCounts(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "none"
+	}
+	keys := make([]string, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", key, counts[key]))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func candidateTitle(c process.Candidate) string {
+	if strings.TrimSpace(c.Title) != "" {
+		return truncate(strings.TrimSpace(c.Title), 72)
+	}
+	return truncate(strings.TrimSpace(c.Content), 72)
+}
+
+func candidateSource(c process.Candidate) string {
+	if strings.TrimSpace(c.SourceDate) != "" {
+		return strings.TrimSpace(c.SourceDate)
+	}
+	if strings.TrimSpace(c.SourceFile) != "" {
+		return filepath.Base(c.SourceFile)
+	}
+	return ""
+}
+
+func runInboxTriage() error {
+	store, err := process.NewStore("")
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	counts, err := store.CandidateStatusCounts()
+	if err != nil {
+		return err
+	}
+	candidates, err := store.ListPendingCandidates()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("AI Inbox: %d pending · %d promoted · %d dismissed\n", counts.Pending, counts.Accepted, counts.Rejected)
+	if len(candidates) == 0 {
+		fmt.Println("AI Inbox 已清空。")
 		return nil
 	}
 
@@ -260,29 +389,29 @@ func runReview() error {
 		} else {
 			fmt.Println("Source:", c.SourceFile)
 		}
-		fmt.Print("Action [a=accept, r=reject, s=skip, q=quit]: ")
+		fmt.Print("Action [p=promote, d=dismiss, s=defer, q=quit]: ")
 		line, err := reader.ReadString('\n')
 		if err != nil && err != io.EOF {
 			return err
 		}
 		action := strings.TrimSpace(strings.ToLower(line))
 		switch action {
-		case "a", "accept":
+		case "p", "promote", "a", "accept":
 			if err := store.AcceptCandidate(c.ID); err != nil {
 				return err
 			}
-			fmt.Println("Accepted.")
-		case "r", "reject":
+			fmt.Println("Promoted.")
+		case "d", "dismiss", "r", "reject":
 			if err := store.RejectCandidate(c.ID); err != nil {
 				return err
 			}
-			fmt.Println("Rejected.")
-		case "s", "skip", "":
-			fmt.Println("Skipped.")
+			fmt.Println("Dismissed.")
+		case "s", "skip", "defer", "":
+			fmt.Println("Deferred.")
 		case "q", "quit":
 			return nil
 		default:
-			fmt.Println("Unknown action, skipped.")
+			fmt.Println("Unknown action, deferred.")
 		}
 	}
 	return nil

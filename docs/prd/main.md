@@ -1,7 +1,7 @@
 # Dear Diary PRD
 
-> Last updated: 2026-06-26
-> Product status: v0.4.0 Closure Core implemented
+> Last updated: 2026-06-30
+> Product status: v0.6.1 AI Inbox semantics implemented
 > Repository: `github.com/borankux/dear-diary`
 > Primary user: Frank
 
@@ -14,11 +14,11 @@ The product has evolved from a lightweight journal CLI into a local personal ope
 1. **Capture**: write dated Markdown entries quickly in Vim or another configured editor.
 2. **Recall**: browse a TUI calendar, search historical entries, view writing streaks, and see "on this day" memories.
 3. **Extract**: process recent diary entries with an LLM to derive Todos and Memories.
-4. **Review**: view extracted assets and diary content in a generated local HTML dashboard.
+4. **Inbox**: inspect extracted candidates as an AI Inbox, then promote only the items worth keeping.
 
-The core journal experience is already usable. v0.4 turns the AI extraction layer into a closure loop: AI output enters a pending candidate layer, human review promotes or rejects it, and Todos can be completed or archived.
+The core journal experience is already usable. v0.6.1 turns the AI extraction layer into an Inbox-based closure loop: AI output enters a pending candidate layer, the default view shows a summary instead of forcing item-by-item review, and explicit triage promotes or dismisses candidates.
 
-`write diary -> extract candidates -> review -> accept / reject -> complete / archive -> avoid duplicate generation`
+`write diary -> extract candidates -> inbox summary -> triage -> promote / dismiss -> complete / archive -> avoid duplicate generation`
 
 ## 2. Product Goals
 
@@ -36,7 +36,7 @@ Keep v0.4.0 small and run it for daily use: no new asset types until the existin
 - Journal source files stay plain Markdown and remain readable outside the app.
 - Generated artifacts never pollute the canonical journal archive.
 - AI extraction is provider-neutral, auditable, and reversible.
-- Todos and Memories can be reviewed, corrected, completed, archived, and deduplicated.
+- Todos and Memories can be promoted from candidates, completed, archived, and deduplicated.
 - Re-running commands does not create duplicate records or misleading dashboard output.
 - The user can understand the current system state from the CLI, dashboard, and project docs.
 
@@ -102,8 +102,10 @@ If the user opens today's existing entry through the default `diary` command, th
 | `diary <date>` | Open a specific date (`YYYY-MM-DD`, `MM-DD`, `M/D`) | Active |
 | `diary browse` | Open TUI monthly calendar browser | Active |
 | `diary search <keyword>` | Search journal Markdown and show a TUI result list | Active, needs generated-file filtering |
-| `diary process` | Process recent changed diary files with an LLM and create pending candidates | v0.4 active |
-| `diary review` | Accept / reject / skip pending AI candidates | v0.4 active |
+| `diary process` | Process recent changed diary files with an LLM and create pending candidates | Active |
+| `diary inbox` | Show an AI Inbox summary without forcing item-by-item triage | v0.6.1 active |
+| `diary inbox triage` | Promote / dismiss / defer pending AI candidates | v0.6.1 active |
+| `diary review` | Compatibility alias for `diary inbox triage` | Compatibility |
 | `diary todo` | List active todos | v0.4 active |
 | `diary todo done <id>` | Mark a todo done | v0.4 active |
 | `diary todo archive <id>` | Archive a todo | v0.4 active |
@@ -175,7 +177,8 @@ Verified on 2026-06-26 after v0.4 implementation:
 - `go vet ./...`: passing
 - `make build`: passing
 - AI extraction now writes pending candidates instead of final todos/memories
-- `diary review` can accept/reject/skip candidates
+- `diary inbox` shows pending candidate counts and a small attention slice
+- `diary inbox triage` can promote/dismiss/defer candidates
 - `diary todo` can list/done/archive active todos
 - Search, scanner, and dashboard share canonical diary-file filtering
 
@@ -191,7 +194,7 @@ Verified on 2026-06-26 after v0.4 implementation:
 ### 7.2 POC / Hardening Needed
 
 - Run the closure loop on real entries for 30 days.
-- Add review edit/merge only if accept/reject is too lossy.
+- Add triage edit/merge only if promote/dismiss is too lossy.
 - Consider local model or LLM gateway after the provider-neutral boundary is exercised.
 
 ## 8. Functional Requirements
@@ -269,16 +272,16 @@ The CLI and docs must state that `diary process` sends journal content to the co
 The system does not treat AI output as final by default. The implemented v0.4 lifecycle is:
 
 ```text
-extracted candidate -> pending -> accepted / rejected -> active Todo / active Memory -> done / archived where applicable
+extracted candidate -> pending -> promoted / dismissed -> active Todo / active Memory -> done / archived where applicable
 ```
 
 Implemented behavior:
 
-- Proposed Todos and Memories are visible before acceptance.
-- Rejected candidates are remembered to prevent repeated suggestions.
-- Accepted Todos enter the active Todo list.
-- Accepted Memories enter the Memory store.
-- Accepted items preserve source traceability.
+- Proposed Todos and Memories remain in AI Inbox before promotion.
+- Dismissed candidates are remembered to prevent repeated suggestions.
+- Promoted Todos enter the active Todo list.
+- Promoted Memories enter the Memory store.
+- Promoted items preserve source traceability.
 
 ### 8.8 Todo Lifecycle
 
@@ -386,8 +389,8 @@ Implemented scope:
 4. Add clear privacy/provider disclosure to CLI help and README.
 5. Persist fatal state transitions in process logs.
 6. Add `diary todo`, `diary todo done`, and `diary todo archive`.
-7. Add pending/accepted/rejected lifecycle for AI candidates.
-8. Add `diary review`.
+7. Add pending/promoted/dismissed lifecycle semantics for AI candidates.
+8. Add `diary inbox` and keep `diary review` as compatibility alias.
 9. Sync project docs to v0.4.0 status.
 
 Acceptance criteria:
@@ -398,13 +401,13 @@ Acceptance criteria:
 - Re-running `diary process` does not create duplicates.
 - Failed runs have durable logs with reason.
 - A generated Todo can be completed or archived from CLI.
-- Rejected AI candidates do not reappear on the next run for identical source content.
+- Dismissed AI candidates do not reappear on the next run for identical source content.
 
 ## 13. Future Milestones
 
-### v0.4.1: Review Polish
+### Next: Inbox Triage Polish
 
-- Interactive accept/reject/merge UI.
+- Interactive promote/dismiss/merge UI.
 - Memory grouping by topic.
 - Safer local file links or editor integration.
 

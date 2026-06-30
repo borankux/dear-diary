@@ -3,9 +3,9 @@
 [![CI](https://github.com/borankux/dear-diary/actions/workflows/ci.yml/badge.svg)](https://github.com/borankux/dear-diary/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/borankux/dear-diary.svg)](https://pkg.go.dev/github.com/borankux/dear-diary)
 
-亲爱的日记是一个 Vim-first、本地优先的 macOS 终端日记工具：输入 `diary` 直接用 Vim 写今天，输入 `diary browse` 用 TUI 月历回看，输入 `diary search <keyword>` 全文搜索 Markdown 日记。v0.4 增加了 AI 候选提炼、人工 review、Todo 闭环和本地 dashboard。
+亲爱的日记是一个 Vim-first、本地优先的 macOS 终端日记工具：输入 `diary` 直接用 Vim 写今天，输入 `diary browse` 用 TUI 月历回看，输入 `diary search <keyword>` 全文搜索 Markdown 日记。AI 提炼结果先进入 Inbox，只有被提升后才进入可信 Todo / Memory。
 
-Dear Diary is a Vim-first local journal app for macOS. It stores plain Markdown files, opens entries in your editor, provides a Bubble Tea calendar browser, searches journal history from the command line, and can turn diary entries into reviewable AI candidates for Todos and Memories.
+Dear Diary is a Vim-first local journal app for macOS. It stores plain Markdown files, opens entries in your editor, provides a Bubble Tea calendar browser, searches journal history from the command line, and can turn diary entries into an AI Inbox for optional Todo and Memory promotion.
 
 ## Why dear-diary
 
@@ -14,8 +14,8 @@ Dear Diary is a Vim-first local journal app for macOS. It stores plain Markdown 
 - **Safe same-day append**: reopening today adds a new timestamp section instead of overwriting earlier notes.
 - **Plain Markdown storage**: readable, portable, git-friendly, and compatible with Obsidian or any text editor.
 - **Fast single binary**: Go CLI with no runtime service, database, account, or cloud dependency.
-- **Private by default**: writing, browsing, searching, reviewing, todo management, and dashboard viewing are local. `diary process` is explicit AI Mode.
-- **Closed-loop AI processing**: LLM output becomes pending candidates first; you accept or reject before it becomes a Todo or Memory.
+- **Private by default**: writing, browsing, searching, inbox viewing, todo management, and dashboard viewing are local. `diary process` is explicit AI Mode.
+- **Closed-loop AI processing**: LLM output becomes pending Inbox candidates first; you promote or dismiss before it becomes a Todo or Memory.
 
 ## Use cases
 
@@ -58,7 +58,9 @@ go install github.com/borankux/dear-diary/cmd/diary@latest
 | `diary 6/24` | Open month/day in the current year |
 | `diary search keyword` | Search all journal entries |
 | `diary process` | Extract pending Todo / Memory candidates with the configured LLM provider |
-| `diary review` | Accept, reject, skip, or quit pending AI candidates |
+| `diary inbox` | Show the AI Inbox summary without starting triage |
+| `diary inbox triage` | Promote, dismiss, defer, or quit pending AI candidates |
+| `diary review` | Compatibility alias for `diary inbox triage` |
 | `diary todo` | List active todos |
 | `diary todo done <id>` | Mark a todo done |
 | `diary todo archive <id>` | Archive a todo without completing it |
@@ -162,17 +164,20 @@ The v0.4 closure workflow is:
 ```bash
 diary
 diary process
-diary review
+diary inbox
+diary inbox triage
 diary todo
 diary dashboard
 ```
 
-`diary process` writes AI output into `ai_candidates` as `pending`. It does not directly create final Todos or Memories. `diary review` is the human gate:
+`diary process` writes AI output into `ai_candidates` as `pending`. It does not directly create final Todos or Memories. `diary inbox` shows the queue summary without forcing you to handle every item. `diary inbox triage` is the explicit promotion path:
 
-- `accept`: create a final Todo or Memory
-- `reject`: keep the candidate rejected so the same source/content does not resurface
-- `skip`: leave the candidate pending
-- `quit`: stop review
+- `promote`: create a final Todo or Memory
+- `dismiss`: keep the candidate dismissed so the same source/content does not resurface
+- `defer`: leave the candidate pending
+- `quit`: stop triage
+
+For compatibility, the old `diary review` command and `accept` / `reject` actions still work.
 
 Provider-neutral configuration is preferred:
 
@@ -207,6 +212,7 @@ Local Mode commands do not upload diary content:
 diary
 diary browse
 diary search
+diary inbox
 diary review
 diary todo
 diary dashboard
@@ -249,7 +255,7 @@ docs/spec.md        Product and implementation spec
 ## Roadmap
 
 - Stabilize the 30-day Closure Core loop
-- Add review edit / merge only after accept / reject / done / archive feels good
+- Add inbox edit / merge only after promote / dismiss / done / archive feels good
 - Optional local model or LLM gateway configuration
 - Later: export, tags, reminders, Homebrew formula
 
@@ -273,7 +279,7 @@ Journal entries are not stored in this repository. They are written to `~/Docume
 
 ### Does AI processing change my diary files?
 
-No. `diary process` reads canonical diary files and writes pending candidates to SQLite. Final Todos and Memories are created only after `diary review`.
+No. `diary process` reads canonical diary files and writes pending candidates to SQLite. Final Todos and Memories are created only after `diary inbox triage` promotes a candidate.
 
 ## Keywords
 

@@ -312,16 +312,16 @@ func buildTodoBoardColumns(candidates []Candidate, activeTodos, inProgressTodos,
 	return []TodoBoardColumn{
 		{
 			Key:         "inbox",
-			Title:       "Inbox",
-			Description: "AI 候选，还没有进入可信 todo/memory。",
+			Title:       "AI Inbox",
+			Description: "AI 提取出的建议，只在你提升后才进入可信 todo/memory。",
 			Count:       len(inboxItems),
-			EmptyText:   "没有待确认候选。",
+			EmptyText:   "没有待提升候选。",
 			Items:       inboxItems,
 		},
 		{
 			Key:         "active",
 			Title:       "Active",
-			Description: "已经接受，尚未开始或未分类的真实 todo。",
+			Description: "已经提升，尚未开始或未分类的真实 todo。",
 			Count:       len(activeItems),
 			EmptyText:   "没有 active todo。",
 			Items:       activeItems,
@@ -1222,7 +1222,7 @@ const dashboardTemplate = `<!DOCTYPE html>
 				<div class="kicker">Daily closure</div>
 				<h2 id="briefing-title">
 					{{if .Today.Exists}}今天已写 {{.Today.Sections}} 段。{{else}}今天还没有写日记。{{end}}
-					{{if .CandidateCount}}{{.CandidateCount}} 条候选还在 inbox。{{else}}Inbox 已清空。{{end}}
+					{{if .CandidateCount}}{{.CandidateCount}} 条候选还在 AI Inbox。{{else}}AI Inbox 已清空。{{end}}
 				</h2>
 				<p>
 					{{.TodoStatusCounts.Active}} 个 active，{{.TodoStatusCounts.InProgress}} 个正在做，{{.TodoStatusCounts.Done}} 个已完成，{{.TodoStatusCounts.WontDo}} 个不打算做，{{.TodoStatusCounts.Archived}} 个已归档。
@@ -1230,7 +1230,7 @@ const dashboardTemplate = `<!DOCTYPE html>
 				</p>
 			</div>
 			<div class="metric-row" aria-label="Dashboard counts">
-				<div class="metric"><strong>{{.CandidateCount}}</strong><span>Inbox candidates</span></div>
+				<div class="metric"><strong>{{.CandidateCount}}</strong><span>AI Inbox</span></div>
 				<div class="metric"><strong>{{.TodoStatusCounts.Active}}</strong><span>Active todos</span></div>
 				<div class="metric"><strong>{{.TodoStatusCounts.InProgress}}</strong><span>In progress</span></div>
 				<div class="metric"><strong>{{.TodoStatusCounts.Done}}</strong><span>Done todos</span></div>

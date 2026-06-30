@@ -4,6 +4,18 @@
 
 <!-- version-style: semantic -->
 
+## v0.6.1 (2026-06-30)
+
+### Patch: AI Inbox semantics
+
+- 新增 `diary inbox`：默认只显示 AI Inbox 摘要和少量候选，不强迫逐条处理。
+- 新增 `diary inbox triage`：显式进入 promote / dismiss / defer / quit 流程。
+- 保留 `diary review` 以及 accept / reject 动作为兼容别名。
+- Web Dashboard 将候选列改为 `AI Inbox`，按钮文案改为“提升 / 丢弃”，并限制首屏展示数量。
+- 远程 CLI 新增 `diary remote promote <id>` / `diary remote dismiss <id>`，旧 accept / reject 保持可用。
+- 对齐 README / PRD / 项目交接文档，并修复 `web/package-lock.json` 与 `package.json` 不同步导致 `npm ci` 失败的问题。
+- 验证：`npm --prefix web ci`、`npm --prefix web run build`、`go test ./...`、`go vet ./...`、`make build`、临时数据库 CLI smoke test。
+
 ## v0.4.0 (2026-06-26)
 
 ### Minor: Closure Core

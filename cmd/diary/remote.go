@@ -12,7 +12,7 @@ import (
 
 func runRemote(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("用法: diary remote <setup|login|status|stats|todo|candidates|memories|diary|calendar|search|accept|reject|done>")
+		return fmt.Errorf("用法: diary remote <setup|login|status|stats|todo|candidates|memories|diary|calendar|search|promote|dismiss|done>")
 	}
 	c := client.NewClient()
 
@@ -194,12 +194,12 @@ func runRemote(args []string) error {
 		}
 		return nil
 
-	case "accept":
+	case "promote", "accept":
 		if !c.IsConfigured() {
 			return fmt.Errorf("未配置远程服务器，请先用 diary remote setup <url>")
 		}
 		if len(args) < 2 {
-			return fmt.Errorf("用法: diary remote accept <id>")
+			return fmt.Errorf("用法: diary remote promote <id>")
 		}
 		id, err := strconv.Atoi(args[1])
 		if err != nil {
@@ -208,15 +208,15 @@ func runRemote(args []string) error {
 		if err := c.AcceptCandidate(id); err != nil {
 			return err
 		}
-		fmt.Printf("候选 #%d 已接受\n", id)
+		fmt.Printf("候选 #%d 已提升\n", id)
 		return nil
 
-	case "reject":
+	case "dismiss", "reject":
 		if !c.IsConfigured() {
 			return fmt.Errorf("未配置远程服务器，请先用 diary remote setup <url>")
 		}
 		if len(args) < 2 {
-			return fmt.Errorf("用法: diary remote reject <id>")
+			return fmt.Errorf("用法: diary remote dismiss <id>")
 		}
 		id, err := strconv.Atoi(args[1])
 		if err != nil {
@@ -225,7 +225,7 @@ func runRemote(args []string) error {
 		if err := c.RejectCandidate(id); err != nil {
 			return err
 		}
-		fmt.Printf("候选 #%d 已拒绝\n", id)
+		fmt.Printf("候选 #%d 已丢弃\n", id)
 		return nil
 
 	case "done":
