@@ -2,6 +2,7 @@ package process
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -416,6 +417,34 @@ func TestMergeDuplicateItemsKeepsDoneTodo(t *testing.T) {
 	}
 	if len(done) != 1 {
 		t.Fatalf("expected done representative preserved, got %d", len(done))
+	}
+}
+
+func TestMergeDuplicateItemsMergesMemoriesByTopic(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.InsertMemory("Frank 工作偏好", "喜欢先验证事实再改代码。", "/a/2026-06/2026-06-28.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertMemory("Frank工作偏好", "需要区分本地状态和线上状态。", "/a/2026-06/2026-06-29.md"); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.MergeDuplicateItems()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MemoryMerged != 1 {
+		t.Fatalf("expected 1 merged memory, got %+v", result)
+	}
+	memories, err := s.ListMemories()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(memories) != 1 {
+		t.Fatalf("expected 1 active memory after merge, got %d", len(memories))
+	}
+	if !strings.Contains(memories[0].Summary, "喜欢先验证事实再改代码") || !strings.Contains(memories[0].Summary, "需要区分本地状态和线上状态") {
+		t.Fatalf("expected merged memory summary to keep both facts, got %q", memories[0].Summary)
 	}
 }
 

@@ -648,7 +648,7 @@ func (s *Store) PromoteAllPendingCandidates() (BulkPromotionResult, error) {
 
 // MergeDuplicateItems collapses obvious duplicates without deleting history.
 // Pending candidate duplicates are dismissed and point at the kept candidate.
-// Active todo/memory duplicates are archived so they disappear from working views.
+// Todo/memory duplicates are archived so they disappear from working views.
 func (s *Store) MergeDuplicateItems() (MergeResult, error) {
 	var result MergeResult
 
@@ -732,6 +732,17 @@ func (s *Store) MergeDuplicateItems() (MergeResult, error) {
 	for _, group := range memoryGroups {
 		keep := keepMemory(group)
 		dupes := 0
+		mergedSummary := mergeMemorySummaries(keep, group)
+		if mergedSummary != strings.TrimSpace(keep.Summary) {
+			_, err := s.db.Exec(
+				`UPDATE memories SET summary = ?, updated_at = ?
+				 WHERE id = ? AND COALESCE(status, 'active') = 'active'`,
+				mergedSummary, now, keep.ID,
+			)
+			if err != nil {
+				return result, err
+			}
+		}
 		for _, memory := range group {
 			if memory.ID == keep.ID {
 				continue
@@ -820,7 +831,7 @@ func groupTodosBySignature(todos []Todo) [][]Todo {
 func groupMemoriesBySignature(memories []Memory) [][]Memory {
 	groups := make(map[string][]Memory)
 	for _, memory := range memories {
-		key := duplicateSignature(memory.Topic + " " + memory.Summary)
+		key := memoryDuplicateSignature(memory)
 		if key == "" {
 			continue
 		}
@@ -833,6 +844,30 @@ func groupMemoriesBySignature(memories []Memory) [][]Memory {
 		}
 	}
 	return result
+}
+
+func memoryDuplicateSignature(memory Memory) string {
+	if key := compactDuplicateKey(memory.Topic); key != "" {
+		return "topic:" + key
+	}
+	if key := duplicateSignature(memory.Topic + " " + memory.Summary); key != "" {
+		return "content:" + key
+	}
+	return ""
+}
+
+func compactDuplicateKey(text string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(text) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	key := b.String()
+	if len([]rune(key)) < 2 {
+		return ""
+	}
+	return key
 }
 
 func duplicateSignature(text string) string {
@@ -952,6 +987,39 @@ func keepMemory(group []Memory) Memory {
 		}
 	}
 	return best
+}
+
+func mergeMemorySummaries(keep Memory, group []Memory) string {
+	ordered := append([]Memory(nil), group...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return ordered[i].CreatedAt.Before(ordered[j].CreatedAt)
+	})
+
+	parts := make([]string, 0, len(group))
+	seen := make(map[string]struct{})
+	addSummary := func(summary string) {
+		summary = strings.TrimSpace(summary)
+		if summary == "" {
+			return
+		}
+		key := compactDuplicateKey(summary)
+		if key == "" {
+			key = summary
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		parts = append(parts, summary)
+	}
+
+	addSummary(keep.Summary)
+	for _, memory := range ordered {
+		if memory.ID != keep.ID {
+			addSummary(memory.Summary)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // MarkTodoDone closes an active todo as completed.

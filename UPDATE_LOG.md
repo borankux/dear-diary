@@ -4,6 +4,15 @@
 
 <!-- version-style: semantic -->
 
+## v0.6.4 (2026-06-30)
+
+### Patch: merge duplicate memory topics
+
+- 修正 Memory 重复合并维度：同一 `topic` 的多条 active memory 现在会合并为一条。
+- 合并 Memory 时会把不同 summary 去重拼接到保留记录，避免只归档而丢失可见信息。
+- 继续保留历史记录：被合并的 memory 标记为 archived，不做物理删除。
+- 补充单元测试覆盖同 topic / 不同 summary 的合并场景。
+
 ## v0.6.3 (2026-06-30)
 
 ### Patch: duplicate todo merge respects done state
