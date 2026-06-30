@@ -28,7 +28,7 @@ Make Dear Diary a daily-use personal journal and reflection system that remains 
 
 ### 2.2 Current Phase Goal
 
-Keep v0.4.0 small and run it for daily use: no new asset types until the existing Candidate -> Todo / Memory loop feels reliable.
+Keep v0.6.1 small and run it for daily use: no new asset types until the existing AI Inbox -> Todo / Memory loop feels reliable.
 
 ### 2.3 Success Criteria
 
@@ -169,13 +169,17 @@ Current implementation uses OpenAI-compatible API settings and reads generic `DI
 
 ## 7. Current Status Snapshot
 
-Verified on 2026-06-26 after v0.4 implementation:
+Verified on 2026-06-30 after v0.6.1 AI Inbox deployment:
 
 - Global binary: `/Users/allintech/bin/diary`
-- Current build output version: `0.4.0`
+- Current build output version: `0.6.1`
+- Public health version: `0.6.1-server`
 - `go test ./...`: passing
 - `go vet ./...`: passing
+- `npm --prefix web ci`: passing
+- `npm --prefix web run build`: passing
 - `make build`: passing
+- Browser smoke: desktop and mobile dashboard render without console/API errors or horizontal overflow
 - AI extraction now writes pending candidates instead of final todos/memories
 - `diary inbox` shows pending candidate counts and a small attention slice
 - `diary inbox triage` can promote/dismiss/defer candidates

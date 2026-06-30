@@ -2,7 +2,7 @@
 
 > 部署服务器: `47.83.215.224` (阿里云香港)  
 > 域名: `https://diary.wakitsoft.com`  
-> 版本: v0.6.0-server
+> 版本: v0.6.1-server
 
 ---
 
