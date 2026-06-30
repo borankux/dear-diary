@@ -377,6 +377,48 @@ func TestMergeDuplicateItems(t *testing.T) {
 	}
 }
 
+func TestMergeDuplicateItemsKeepsDoneTodo(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.InsertTodo("准备明天路演", "/a/2026-06/2026-06-28.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertTodo("准备明天路演", "/a/2026-06/2026-06-28.md"); err != nil {
+		t.Fatal(err)
+	}
+	todos, err := s.ListActiveTodos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(todos) != 2 {
+		t.Fatalf("expected 2 active todos before merge, got %d", len(todos))
+	}
+	if err := s.MarkTodoDone(todos[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.MergeDuplicateItems()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TodoMerged != 1 {
+		t.Fatalf("expected 1 merged todo, got %+v", result)
+	}
+	active, err := s.ListActiveTodos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("expected duplicate active todo archived, got %+v", active)
+	}
+	done, err := s.ListTodosByStatus(TodoStatusDone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(done) != 1 {
+		t.Fatalf("expected done representative preserved, got %d", len(done))
+	}
+}
+
 func TestPromoteAllPendingCandidates(t *testing.T) {
 	s := newTestStore(t)
 	candidates := []Candidate{

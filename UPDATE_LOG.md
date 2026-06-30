@@ -4,6 +4,14 @@
 
 <!-- version-style: semantic -->
 
+## v0.6.3 (2026-06-30)
+
+### Patch: duplicate todo merge respects done state
+
+- 修正 `合并重复项` 对 Todo 生命周期的处理：重复 Active / In Progress Todo 如果命中已完成 Todo，现在会保留 Done 记录并归档未完成重复项。
+- 已完成 Todo 在重复合并中拥有更高优先级，避免同一事项完成后又因为重复 Active 记录回到待办看板。
+- 补充单元测试覆盖 Done + Active 同文本重复的场景。
+
 ## v0.6.2 (2026-06-30)
 
 ### Patch: AI Inbox bulk cleanup

@@ -703,8 +703,8 @@ func (s *Store) MergeDuplicateItems() (MergeResult, error) {
 			}
 			res, err := s.db.Exec(
 				`UPDATE todos SET status = ?, updated_at = ?
-				 WHERE id = ? AND status IN (?, ?)`,
-				TodoStatusArchived, now, todo.ID, TodoStatusActive, TodoStatusInProgress,
+				 WHERE id = ? AND status IN (?, ?, ?)`,
+				TodoStatusArchived, now, todo.ID, TodoStatusActive, TodoStatusInProgress, TodoStatusDone,
 			)
 			if err != nil {
 				return result, err
@@ -765,9 +765,9 @@ func (s *Store) listMergeableTodos() ([]Todo, error) {
 	rows, err := s.db.Query(
 		`SELECT id, text, status, source_file, source_date, source_hash, evidence_text, created_at, updated_at, priority
 		 FROM todos
-		 WHERE status IN (?, ?)
+		 WHERE status IN (?, ?, ?)
 		 ORDER BY updated_at DESC, id ASC`,
-		TodoStatusInProgress, TodoStatusActive,
+		TodoStatusDone, TodoStatusInProgress, TodoStatusActive,
 	)
 	if err != nil {
 		return nil, err
@@ -929,6 +929,9 @@ func keepTodo(group []Todo) Todo {
 
 func todoRank(todo Todo) int {
 	rank := 0
+	if todo.Status == TodoStatusDone {
+		rank += 2000
+	}
 	if todo.Status == TodoStatusInProgress {
 		rank += 1000
 	}
