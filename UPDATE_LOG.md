@@ -4,6 +4,16 @@
 
 <!-- version-style: semantic -->
 
+## v0.6.6 (2026-06-30)
+
+### Patch: simplify todo board states
+
+- Dashboard 主看板从多列生命周期视图收敛为 3 列：Active / In Progress / Done。
+- Archived / Won't Do 不再占主看板列，只作为已收起统计保留；Other 并入 Active 展示。
+- AI Inbox 从主看板列中移出，只有存在候选时才显示独立候选区。
+- `合并重复项` 移到看板上方作为常驻整理动作。
+- 修正短中文 Todo 去重签名，像“写周报”这类短任务也会按完整归一化文本合并。
+
 ## v0.6.5 (2026-06-30)
 
 ### Patch: smoother todo board interactions

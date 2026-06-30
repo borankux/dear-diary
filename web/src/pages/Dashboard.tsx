@@ -2,13 +2,9 @@ import { useEffect, useState, useRef } from 'react';
 import { getStats, getTodos, getCandidates, getDiaries, acceptCandidate, rejectCandidate, updateTodoStatus, mergeDuplicateCandidates, promoteAllCandidates, clearAuthToken, type Stats, type Todo, type Candidate, type MergeResult } from '../api';
 
 const BOARD_COLUMNS = [
-  { key: 'inbox', title: 'AI Inbox', desc: 'AI 提取出的建议，只在你提升后才进入可信 todo/memory', color: 'board-inbox' },
   { key: 'active', title: 'Active', desc: '已经提升，尚未开始或未分类的真实 todo', color: 'board-active' },
   { key: 'in-progress', title: 'In Progress', desc: '正在做，应该优先保持可见', color: 'board-in-progress' },
   { key: 'done', title: 'Done', desc: '最近完成的 todo，用来看到闭环', color: 'board-done' },
-  { key: 'wont-do', title: "Won't Do", desc: '明确不打算做，避免继续占注意力', color: 'board-wont-do' },
-  { key: 'archived', title: 'Archived', desc: '已收起但不算完成的 todo', color: 'board-archived' },
-  { key: 'other', title: 'Other', desc: 'AI 或人工暂时无法归类的 todo', color: 'board-other' },
 ] as const;
 
 const INBOX_PREVIEW_LIMIT = 24;
@@ -158,8 +154,8 @@ export default function Dashboard() {
     window.location.reload();
   }
 
-  const groupedTodos = BOARD_COLUMNS.slice(1).reduce<Record<string, Todo[]>>((acc, col) => {
-    acc[col.key] = (todos || []).filter((t) => t.status === col.key.replace('-', '_'));
+  const groupedTodos = BOARD_COLUMNS.reduce<Record<string, Todo[]>>((acc, col) => {
+    acc[col.key] = (todos || []).filter((t) => todoBelongsToColumn(t, col.key));
     return acc;
   }, {});
   const visibleCandidates = candidates.slice(0, INBOX_PREVIEW_LIMIT);
@@ -180,7 +176,7 @@ export default function Dashboard() {
             {stats?.candidateCount === 0 ? ' AI Inbox 已清空。' : ''}
           </h1>
           <p style={{ color: 'var(--text)', margin: '8px 0 0', maxWidth: 760 }}>
-            {stats?.todoCounts.active} 个 active，{stats?.todoCounts.in_progress} 个正在做，{stats?.todoCounts.done} 个已完成，{stats?.todoCounts.wont_do} 个不打算做，{stats?.todoCounts.archived} 个已归档。日记共 {stats?.diaryCount} 篇，长期记忆 {stats?.memoryCount} 条。
+            主看板只显示 Active / In Progress / Done；其他未分类会并入 Active。已收起 {closedTodoCount(stats)} 个：{stats?.todoCounts.archived} 个归档，{stats?.todoCounts.wont_do} 个不做。日记共 {stats?.diaryCount} 篇，长期记忆 {stats?.memoryCount} 条。
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -195,57 +191,52 @@ export default function Dashboard() {
 
       <div className="metric-row">
         <div className="metric"><strong>{stats?.candidateCount}</strong><span>AI Inbox</span></div>
-        <div className="metric"><strong>{stats?.todoCounts.active}</strong><span>Active todos</span></div>
+        <div className="metric"><strong>{openTodoCount(stats)}</strong><span>Open todos</span></div>
         <div className="metric"><strong>{stats?.todoCounts.in_progress}</strong><span>In progress</span></div>
         <div className="metric"><strong>{stats?.todoCounts.done}</strong><span>Done todos</span></div>
-        <div className="metric"><strong>{stats?.todoCounts.wont_do}</strong><span> Won't do</span></div>
+        <div className="metric"><strong>{closedTodoCount(stats)}</strong><span>Hidden closed</span></div>
         <div className="metric"><strong>{stats?.diaryCount}</strong><span>Diary entries</span></div>
       </div>
 
-      <section className="board-section">
-        <div className="board-grid">
-          {/* Inbox column: candidates */}
-          <div className="board-column board-inbox">
-            <header>
-              <h3>AI Inbox</h3>
-              <span className="board-count">{candidates.length}</span>
-            </header>
-            <p style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '0 0 10px' }}>
-              AI 提取出的建议，只在你提升后才进入可信 todo/memory。这里只展示最需要处理的前 {visibleCandidates.length} 条。
-            </p>
-            <div className="column-tools">
-              <button onClick={handleMergeDuplicates} disabled={bulkBusy}>合并重复项</button>
-              <button className="bulk-primary" onClick={handlePromoteAll} disabled={bulkBusy || candidates.length === 0}>全部提升</button>
-            </div>
-            {bulkMessage && <div className="bulk-message">{bulkMessage}</div>}
-            {candidates.length === 0 ? (
-              <div className="empty">没有待提升候选。</div>
-            ) : (
-              <>
-                {visibleCandidates.map((c) => (
-                  <div className="board-card" key={c.id}>
-                    <div className="card-meta">
-                      <span>{c.type.toUpperCase()}</span>
-                      <span className="card-id">#{c.id}</span>
-                    </div>
-                    <strong>{c.title || c.content.slice(0, 60)}</strong>
-                    {c.evidenceText && <p>{c.evidenceText}</p>}
-                    <div className="source">{c.sourceDate}</div>
-                    <div className="actions">
-                      <button onClick={() => handleAccept(c.id)}>提升</button>
-                      <button onClick={() => handleReject(c.id)}>丢弃</button>
-                    </div>
-                  </div>
-                ))}
-                {hiddenCandidateCount > 0 && (
-                  <div className="empty">还有 {hiddenCandidateCount} 条保留在后台，不需要一次性处理完。</div>
-                )}
-              </>
-            )}
-          </div>
+      <div className="dashboard-tools">
+        <button onClick={handleMergeDuplicates} disabled={bulkBusy}>合并重复项</button>
+        <button className="bulk-primary" onClick={handlePromoteAll} disabled={bulkBusy || candidates.length === 0}>全部提升 AI Inbox</button>
+        {bulkMessage && <div className="bulk-message">{bulkMessage}</div>}
+      </div>
 
-          {/* Todo status columns */}
-          {BOARD_COLUMNS.slice(1).map((col) => (
+      {candidates.length > 0 && (
+        <section className="inbox-section">
+          <div className="section-title">
+            <h2>AI Inbox</h2>
+            <span>{candidates.length} 条候选</span>
+          </div>
+          <p className="section-note">AI 提取出的建议，只在你提升后才进入可信 todo/memory。这里只展示最需要处理的前 {visibleCandidates.length} 条。</p>
+          <div className="inbox-grid">
+            {visibleCandidates.map((c) => (
+              <div className="board-card" key={c.id}>
+                <div className="card-meta">
+                  <span>{c.type.toUpperCase()}</span>
+                  <span className="card-id">#{c.id}</span>
+                </div>
+                <strong>{c.title || c.content.slice(0, 60)}</strong>
+                {c.evidenceText && <p>{c.evidenceText}</p>}
+                <div className="source">{c.sourceDate}</div>
+                <div className="actions">
+                  <button onClick={() => handleAccept(c.id)}>提升</button>
+                  <button onClick={() => handleReject(c.id)}>丢弃</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          {hiddenCandidateCount > 0 && (
+            <div className="empty">还有 {hiddenCandidateCount} 条保留在后台，不需要一次性处理完。</div>
+          )}
+        </section>
+      )}
+
+      <section className="board-section">
+        <div className="board-grid board-grid--primary">
+          {BOARD_COLUMNS.map((col) => (
             <div className={`board-column ${col.color}`} key={col.key}>
               <header>
                 <h3>{col.title}</h3>
@@ -287,6 +278,23 @@ export default function Dashboard() {
 
 function mergeTotal(result: MergeResult) {
   return result.candidateMerged + result.todoMerged + result.memoryMerged;
+}
+
+function openTodoCount(stats: Stats | null) {
+  if (!stats) return 0;
+  return stats.todoCounts.active + stats.todoCounts.in_progress + stats.todoCounts.other;
+}
+
+function closedTodoCount(stats: Stats | null) {
+  if (!stats) return 0;
+  return stats.todoCounts.archived + stats.todoCounts.wont_do;
+}
+
+function todoBelongsToColumn(todo: Todo, columnKey: string) {
+  if (columnKey === 'active') {
+    return todo.status === 'active' || todo.status === 'other';
+  }
+  return todo.status === columnKey.replace('-', '_');
 }
 
 function adjustStatsForTodoStatus(stats: Stats | null, fromStatus: string, toStatus: string): Stats | null {

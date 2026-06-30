@@ -420,6 +420,46 @@ func TestMergeDuplicateItemsKeepsDoneTodo(t *testing.T) {
 	}
 }
 
+func TestMergeDuplicateItemsMergesShortDoneTodos(t *testing.T) {
+	s := newTestStore(t)
+	for range 3 {
+		if err := s.InsertTodo("写周报", "/a/2026-06/2026-06-29.md"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	todos, err := s.ListActiveTodos()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, todo := range todos {
+		if err := s.MarkTodoDone(todo.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := s.MergeDuplicateItems()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TodoMerged != 2 {
+		t.Fatalf("expected 2 merged todos, got %+v", result)
+	}
+	done, err := s.ListTodosByStatus(TodoStatusDone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(done) != 1 {
+		t.Fatalf("expected 1 done representative, got %d", len(done))
+	}
+	archived, err := s.ListTodosByStatus(TodoStatusArchived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(archived) != 2 {
+		t.Fatalf("expected 2 archived duplicates, got %d", len(archived))
+	}
+}
+
 func TestMergeDuplicateItemsMergesMemoriesByTopic(t *testing.T) {
 	s := newTestStore(t)
 	if err := s.InsertMemory("Frank 工作偏好", "喜欢先验证事实再改代码。", "/a/2026-06/2026-06-28.md"); err != nil {

@@ -813,7 +813,7 @@ func candidateDuplicateGroups(groups map[string][]Candidate) [][]Candidate {
 func groupTodosBySignature(todos []Todo) [][]Todo {
 	groups := make(map[string][]Todo)
 	for _, todo := range todos {
-		key := duplicateSignature(todo.Text)
+		key := todoDuplicateSignature(todo)
 		if key == "" {
 			continue
 		}
@@ -826,6 +826,16 @@ func groupTodosBySignature(todos []Todo) [][]Todo {
 		}
 	}
 	return result
+}
+
+func todoDuplicateSignature(todo Todo) string {
+	if key := compactDuplicateKey(todo.Text); key != "" {
+		return "text:" + key
+	}
+	if key := duplicateSignature(todo.Text); key != "" {
+		return "tokens:" + key
+	}
+	return ""
 }
 
 func groupMemoriesBySignature(memories []Memory) [][]Memory {

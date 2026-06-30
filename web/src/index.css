@@ -143,6 +143,43 @@ body {
   font-size: 0.78rem;
 }
 
+.dashboard-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -8px 0 20px;
+  flex-wrap: wrap;
+}
+.dashboard-tools button {
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 850;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, opacity 0.12s;
+}
+.dashboard-tools button:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+.dashboard-tools button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.dashboard-tools .bulk-primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+.dashboard-tools .bulk-message {
+  margin: 0;
+}
+
 /* ========== Board ========== */
 .board-section { margin-top: 24px; }
 .board-section h2 {
@@ -157,6 +194,14 @@ body {
   overflow-x: auto;
   padding-bottom: 12px;
   min-width: 0;
+}
+.board-grid--primary {
+  overflow-x: visible;
+}
+.board-grid--primary .board-column {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 260px;
 }
 .board-column {
   flex: 0 0 300px;
@@ -177,6 +222,42 @@ body {
 .board-column.board-wont-do { border-top-color: var(--wont); }
 .board-column.board-archived { border-top-color: var(--archived); }
 .board-column.board-other { border-top-color: var(--other); }
+
+.inbox-section {
+  margin: 0 0 24px;
+  background: var(--paper-soft);
+  border-top: 4px solid var(--attention);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.section-title h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 900;
+}
+.section-title span,
+.section-note {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.section-note {
+  margin: 0 0 12px;
+}
+.inbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+.inbox-grid .board-card {
+  margin-bottom: 0;
+}
 
 .board-column header {
   display: flex;
@@ -568,7 +649,8 @@ body {
   .navbar { padding: 10px 12px; flex-wrap: wrap; }
   .nav-links { margin-top: 8px; width: 100%; }
   .app-main { padding: 16px 12px 40px; }
-  .board-grid { grid-template-columns: 1fr; }
+  .board-grid--primary { flex-direction: column; overflow-x: visible; }
+  .board-grid--primary .board-column { width: 100%; min-width: 0; max-height: none; }
   .calendar-cell { min-height: 50px; }
 }
 
