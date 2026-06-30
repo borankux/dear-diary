@@ -10,6 +10,7 @@ import (
 
 	"github.com/borankux/dear-diary/internal/process"
 	"github.com/borankux/dear-diary/internal/storage"
+	appversion "github.com/borankux/dear-diary/internal/version"
 )
 
 // SyncHandler 提供同步相关的 API
@@ -263,6 +264,6 @@ func (sh *SyncHandler) HandleDiaryCreate(w http.ResponseWriter, r *http.Request)
 func (sh *SyncHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{
 		"status":  "ok",
-		"version": "0.5.0-server",
+		"version": appversion.Server,
 	})
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/borankux/dear-diary/internal/search"
 	"github.com/borankux/dear-diary/internal/server/sync"
 	"github.com/borankux/dear-diary/internal/storage"
+	appversion "github.com/borankux/dear-diary/internal/version"
 	"github.com/gomarkdown/markdown"
 	"github.com/gomarkdown/markdown/html"
 	"github.com/gomarkdown/markdown/parser"
@@ -659,6 +660,6 @@ func handleDiaryCreate(w http.ResponseWriter, r *http.Request) {
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{
 		"status":  "ok",
-		"version": "0.6.0-server",
+		"version": appversion.Server,
 	})
 }

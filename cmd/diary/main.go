@@ -23,10 +23,9 @@ import (
 	"github.com/borankux/dear-diary/internal/stats"
 	"github.com/borankux/dear-diary/internal/storage"
 	"github.com/borankux/dear-diary/internal/tui"
+	appversion "github.com/borankux/dear-diary/internal/version"
 	"github.com/borankux/dear-diary/internal/web"
 )
-
-const version = "0.6.1"
 
 const usage = `亲爱的日记 — 一个 TUI 日记应用
 
@@ -105,7 +104,7 @@ func main() {
 		fmt.Print(usage)
 		return
 	case "-v", "--version":
-		fmt.Println(version)
+		fmt.Println(appversion.CLI)
 		return
 	case "browse":
 		must(runBrowse())
