@@ -671,10 +671,7 @@ func runSync(args []string) error {
 	if len(args) > 0 && args[0] == "pull" {
 		fmt.Println("正在从远程拉取日记...")
 		if err := execGit(rootDir, "pull", remoteName, branch); err != nil {
-			// 尝试 master 分支
-			if err := execGit(rootDir, "pull", remoteName, "master"); err != nil {
-				return fmt.Errorf("git pull 失败: %w", err)
-			}
+			return fmt.Errorf("git pull 失败: %w", err)
 		}
 		fmt.Println("同步完成：已从远程拉取最新日记")
 		return nil
@@ -694,9 +691,7 @@ func runSync(args []string) error {
 	if !hasChanges {
 		fmt.Println("没有变更需要提交，直接推送...")
 		if err := execGit(rootDir, "push", remoteName, branch); err != nil {
-			if err := execGit(rootDir, "push", remoteName, "master"); err != nil {
-				return fmt.Errorf("git push 失败: %w", err)
-			}
+			return fmt.Errorf("git push 失败: %w", err)
 		}
 		fmt.Println("同步完成")
 		return nil
@@ -707,9 +702,7 @@ func runSync(args []string) error {
 		return fmt.Errorf("git commit 失败: %w", err)
 	}
 	if err := execGit(rootDir, "push", remoteName, branch); err != nil {
-		if err := execGit(rootDir, "push", remoteName, "master"); err != nil {
-			return fmt.Errorf("git push 失败: %w", err)
-		}
+		return fmt.Errorf("git push 失败: %w", err)
 	}
 	fmt.Println("同步完成：已推送日记到远程服务器")
 	return nil
