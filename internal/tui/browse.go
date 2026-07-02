@@ -58,7 +58,7 @@ func (m BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case "?":
-			m.status = "键位: hjkl 移动 · Enter 打开 · H/L 切月 · t 今天 · / 搜索 · q 退出"
+			m.status = "键位: hjkl 移动 · Enter 打开 · [/] 切月 · t 今天 · / 搜索 · q 退出"
 			return m, nil
 		case "/":
 			m.status = "提示: 退出后用 diary search <关键词>"
@@ -81,9 +81,9 @@ func (m BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.month = now.Month()
 			m.cursorDay = now.Day()
 			m.refreshWrittenDays()
-		case "H", "<", "p":
+		case "[", "p":
 			m.prevMonth()
-		case "L", ">", "n":
+		case "]", "n":
 			m.nextMonth()
 		case "enter":
 			return m, m.openEditor()
@@ -246,7 +246,7 @@ func (m BrowseModel) View() string {
 
 	// 帮助行
 	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	help := helpStyle.Render("hjkl/方向键 移动 · ⏎ 打开 · H/L 切月 · t 今天 · / 搜索 · ? 帮助 · q 退出")
+	help := helpStyle.Render("hjkl/方向键 移动 · ⏎ 打开 · [/] 切月 · t 今天 · / 搜索 · ? 帮助 · q 退出")
 
 	var out strings.Builder
 	out.WriteString(header)

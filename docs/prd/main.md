@@ -121,7 +121,7 @@ Calendar behavior:
 - `●` marks days with journal files.
 - Cursor highlights the selected date.
 - `hjkl` and arrow keys move.
-- `H/L` or `< >` switch months.
+- `[` or `]` switch months.
 - `t` jumps to today.
 - `g/G` jump to month start/end.
 - `Enter` opens selected day.

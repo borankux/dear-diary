@@ -1,6 +1,6 @@
 # 亲爱的日记 (dear-diary) 项目指令
 
-> 本文件由 Claude Code 自动加载，定义项目协作规则。
+> 本文件由 Codex 自动加载，定义项目协作规则。
 
 ## 项目概况
 - **产品：** Vim-first macOS 终端日记应用 — TUI 月历浏览、同一天追加时间戳段落、全文搜索
@@ -21,7 +21,7 @@
 | Intent | AI Action |
 |--------|-----------|
 | End session / wrap up — any expression of "we're done for now" (end session, 结束会话, 收工, wrap up, done for today, etc.) | Write log + update handoff + sync Wiki + check TODO + collect constitution candidates + file reorganization + document archiving + evaluate update log + version bump + output summary in configured language |
-| Review constitution — any expression of "check/update rules" (review claude, 更新宪法, check rules, etc.) | Show .claude/candidates.md for confirmation one by one |
+| Review constitution — any expression of "check/update rules" (review Codex, 更新宪法, check rules, etc.) | Show .Codex/candidates.md for confirmation one by one |
 | Sync wiki — any expression of "update project overview" (sync wiki, 同步项目, refresh overview, etc.) | Force rescan and update PROJECT.md |
 | Check status — any expression of "what's the current state" (status, 项目现状, where are we, etc.) | Read PROJECT.md + session-handoff.md summary aloud |
 | Organize files — any expression of "clean up files" (organize files, 整理文件, clean up, sort files, etc.) | Scan project files, organize per STRUCTURE.md rules |
@@ -33,14 +33,14 @@
 
 | File | Who writes | When |
 |------|-----------|------|
-| CLAUDE.md | 人工确认 | review claude 时 |
+| AGENTS.md | 人工确认 | review Codex 时 |
 | PROJECT.md | AI 自动 | end session + 文件结构变化时 |
 | session-handoff.md | AI 自动 | end session 时 |
 | TODO.md | AI + 人 | 随时 |
 | log/session-*.md | AI | end session 时 |
-| .claude/candidates.md | AI 自动 | 过程中识别到稳定规则时 |
+| .Codex/candidates.md | AI 自动 | 过程中识别到稳定规则时 |
 | STRUCTURE.md | AI 自动 | end session + 文件结构变化时 |
-| .claude/.file-snapshot.json | AI 自动 | end session 时 |
+| .Codex/.file-snapshot.json | AI 自动 | end session 时 |
 | UPDATE_LOG.md | AI 自动 | end session + 重大更新时 |
 | DOCS.md | AI 自动 | end session + 文档归档时 |
 
@@ -48,7 +48,7 @@
 
 At session start:
 
-1. Read `PROJECT.md` for project overview and `session-handoff.md` for current progress / next steps. Check the Language setting in CLAUDE.md to determine output language.
+1. Read `PROJECT.md` for project overview and `session-handoff.md` for current progress / next steps. Check the Language setting in AGENTS.md to determine output language.
 2. **Read logs (bounded):**
    - Find the highest level with summaries in `log/summaries/` — read all summaries at that level.
    - Read all unarchived raw logs in `log/` (exclude `summaries/` and `archive/`).
@@ -65,11 +65,11 @@ At session start:
 3. **更新 session-handoff.md** → 刷新"当前进度 / 下一步"
 4. **更新 PROJECT.md** → 如有结构/模块状态变化，同步更新
 5. **更新 TODO.md** → 标记本次已完成的任务
-6. **收集宪法候选** → 识别本次会话中的规则/偏好/边界，追加到 `.claude/candidates.md`
+6. **收集宪法候选** → 识别本次会话中的规则/偏好/边界，追加到 `.Codex/candidates.md`
 7. **整理文件结构（增量模式）** → 只处理新增/变更文件，按 STRUCTURE.md 规则快速归类
    - 若 STRUCTURE.md 不存在：先建立规则表（深度模式），再整理
    - 若 STRUCTURE.md 已存在：只匹配新增文件，不重读已有文件
-   - 更新 `.claude/.file-snapshot.json`
+   - 更新 `.Codex/.file-snapshot.json`
 7.5. **文档归档** → read `references/document-archiving.md`，扫描本次会话产出的文档
    - 识别并分类文档（PRD / 技术设计 / 设计文档 / 调研 / 会议纪要 / 实验记录）
    - 归档到 `docs/` 对应子目录 + 更新 `DOCS.md` 索引元数据
@@ -93,18 +93,18 @@ Session log headers adapt to the configured language. Use the Session Log entrie
 ## Decisions & Rationale
 ## Output Files
 ## Unfinished Items / Next Session Pickup
-## CLAUDE.md Candidates (if any)
+## AGENTS.md Candidates (if any)
 ```
 
 ### Constitution Candidate Rules
 
-AI 在工作过程中，遇到以下情况时自动追加条目到 `.claude/candidates.md`：
+AI 在工作过程中，遇到以下情况时自动追加条目到 `.Codex/candidates.md`：
 - 用户明确说"以后都这么做" / "这是规则" / "不要再…"
 - 同一类决策在多次会话中连续出现
 - 涉及命名规范、文件分层、协作流程的决定
 - 涉及技术栈选择、架构约束的决定
 
-**绝对不要直接修改 CLAUDE.md。** 所有候选条目必须经用户 review 后才写入。
+**绝对不要直接修改 AGENTS.md。** 所有候选条目必须经用户 review 后才写入。
 
 ### TODO Format
 
